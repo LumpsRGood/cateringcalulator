@@ -1,9 +1,7 @@
-import math
-from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
-
 import pandas as pd
 import streamlit as st
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
 
 st.set_page_config(page_title="IHOP Catering Calculator", layout="wide")
 
@@ -27,34 +25,15 @@ class OrderLine:
 
 
 # =========================================================
-# Specs (based on IHOP plating/packaging guide)
+# Combo options (name-only so counts scale by tier)
 # =========================================================
-# IMPORTANT: counts/oz here are "per 1 unit" of the selected item.
-# Combo boxes are tiered: Small, Medium, Large.
-# - Eggs: 40/80/160 oz
-# - Potatoes: 60/120/240 oz
-# - Protein: 20/40/80 pcs
-# - Pancakes: 20/40/80 pcs
-# - French Toast: 10/20/40 pcs
-# Packaging for combos (per tier):
-# - Eggs: 1/2/4 half pans
-# - Potatoes: 1/2/4 half pans
-# - Protein: 1/2/4 large bases
-# - Pancakes: 1/2/4 half pans
-# - French Toast: 2/4/8 half pans
-# Condiments for combos (per tier):
-# - Butter: 10/20/40
-# - Syrup: 10/20/40
-# - Ketchup: 10/20/40
-# - Powdered sugar souffle (French toast only): 2/4/8
-# Serveware for combos (per tier):
-# - Serving forks: 2/2/8
-# - Serving tongs: 2/2/5
-# - Plates: 10/20/40
+PROTEINS = ["Bacon", "Pork Sausage Links", "Ham Slices"]
+GRIDDLE_CHOICES = ["Buttermilk Pancakes", "French Toast"]
 
-PROTEINS = ["Bacon (20 pcs)", "Pork Sausage Links (20 pcs)", "Ham Slices (20 pcs)"]
-GRIDDLE_CHOICES = ["Buttermilk Pancakes (20 pcs)", "French Toast (10 pcs)"]
-
+# =========================================================
+# Combo tier specs (per 1 combo of that size)
+# Quantities & packaging match the plating/packaging guide.
+# =========================================================
 COMBO_TIERS = {
     "Small Combo Box": {
         "food": {
@@ -64,14 +43,20 @@ COMBO_TIERS = {
             "Buttermilk Pancakes (pcs)": 20,
             "French Toast (pcs)": 10,
         },
-        "packaging": {"Half Pans": 1 + 1 + 1 + 2, "Large Bases": 1},  # eggs + potatoes + pancakes + french toast
         "condiments": {
             "Butter Packets": 10,
             "Syrup Packets": 10,
             "Ketchup Packets": 10,
-            "Powdered Sugar Souffle (2 oz)": 2,  # only if french toast selected
+            "Powdered Sugar Souffle (2 oz)": 2,  # French toast only
         },
         "serveware": {"Serving Forks": 2, "Serving Tongs": 2, "Plates": 10},
+        "packaging_ref": {
+            "Eggs Half Pans": 1,
+            "Potatoes Half Pans": 1,
+            "Protein Large Bases": 1,
+            "Pancakes Half Pans": 1,
+            "French Toast Half Pans": 2,
+        },
     },
     "Medium Combo Box": {
         "food": {
@@ -81,7 +66,6 @@ COMBO_TIERS = {
             "Buttermilk Pancakes (pcs)": 40,
             "French Toast (pcs)": 20,
         },
-        "packaging": {"Half Pans": 2 + 2 + 2 + 4, "Large Bases": 2},
         "condiments": {
             "Butter Packets": 20,
             "Syrup Packets": 20,
@@ -89,6 +73,13 @@ COMBO_TIERS = {
             "Powdered Sugar Souffle (2 oz)": 4,
         },
         "serveware": {"Serving Forks": 2, "Serving Tongs": 2, "Plates": 20},
+        "packaging_ref": {
+            "Eggs Half Pans": 2,
+            "Potatoes Half Pans": 2,
+            "Protein Large Bases": 2,
+            "Pancakes Half Pans": 2,
+            "French Toast Half Pans": 4,
+        },
     },
     "Large Combo Box": {
         "food": {
@@ -98,7 +89,6 @@ COMBO_TIERS = {
             "Buttermilk Pancakes (pcs)": 80,
             "French Toast (pcs)": 40,
         },
-        "packaging": {"Half Pans": 4 + 4 + 4 + 8, "Large Bases": 4},
         "condiments": {
             "Butter Packets": 40,
             "Syrup Packets": 40,
@@ -106,10 +96,25 @@ COMBO_TIERS = {
             "Powdered Sugar Souffle (2 oz)": 8,
         },
         "serveware": {"Serving Forks": 8, "Serving Tongs": 5, "Plates": 40},
+        "packaging_ref": {
+            "Eggs Half Pans": 4,
+            "Potatoes Half Pans": 4,
+            "Protein Large Bases": 4,
+            "Pancakes Half Pans": 4,
+            "French Toast Half Pans": 8,
+        },
     },
 }
 
-# A la carte groups with explicit count/oz in labels
+# =========================================================
+# À La Carte groups + items
+# Each item defines:
+# - food totals (oz/pcs)
+# - packaging totals (Half Pans, Large Bases, Soup Cups, etc.)
+# - condiments totals (packets/cups)
+# - serveware totals (plates, tongs, forks, spoons, cups, etc.)
+# =========================================================
+
 ALACARTE_GROUPS = [
     ("Griddle Faves", [
         ("pancakes_20", "Buttermilk Pancakes (20 pcs)",
@@ -128,6 +133,7 @@ ALACARTE_GROUPS = [
          {},
          {"Serving Forks": 1}),
     ]),
+
     ("Breakfast Proteins & Sides", [
         ("eggs_40oz", "Scrambled Eggs (40 oz)",
          {"Scrambled Eggs (oz)": 40},
@@ -160,6 +166,7 @@ ALACARTE_GROUPS = [
          {},
          {"Serving Forks": 1}),
     ]),
+
     ("Burritos", [
         ("burritos_10", "Classic Breakfast Burritos (10 pcs)",
          {"Breakfast Burritos (pcs)": 10},
@@ -167,6 +174,33 @@ ALACARTE_GROUPS = [
          {"Salsa Soup Cups": 2},
          {"Spoons": 2}),
     ]),
+
+    ("Burgers & Chicken (10 pcs)", [
+        ("steakburgers_10", "Steakburgers (10 pcs)",
+         {"Steakburgers (pcs)": 10},
+         {"Half Pans": 1},
+         {"Mayo Packets": 10, "Ketchup Packets": 10, "Mustard Packets": 10,
+          "BBQ Soup Cup": 1, "IHOP Sauce Soup Cup": 1, "Pickle Chips (pcs)": 50},
+         {"Serving Tongs": 2, "Spoons": 2, "Plates": 10}),
+        ("crispy_chx_sand_10", "Crispy Chicken Sandwiches (10 pcs)",
+         {"Crispy Chicken Sandwiches (pcs)": 10},
+         {"Half Pans": 1},
+         {"Mayo Packets": 10, "Ketchup Packets": 10, "Mustard Packets": 10,
+          "BBQ Soup Cup": 1, "IHOP Sauce Soup Cup": 1, "Pickle Chips (pcs)": 50},
+         {"Serving Tongs": 2, "Spoons": 2, "Plates": 10}),
+        ("grilled_chx_sand_10", "Grilled Chicken Sandwiches (10 pcs)",
+         {"Grilled Chicken Sandwiches (pcs)": 10},
+         {"Half Pans": 1},
+         {"Mayo Packets": 10, "Ketchup Packets": 10, "Mustard Packets": 10,
+          "BBQ Soup Cup": 1, "IHOP Sauce Soup Cup": 1, "Pickle Chips (pcs)": 50},
+         {"Serving Tongs": 2, "Spoons": 2, "Plates": 10}),
+        ("sandwich_toppings_halfpan", "Sandwich Toppings (1 half pan)",
+         {},
+         {"Half Pans": 1},
+         {},
+         {}),
+    ]),
+
     ("Lunch / Savory", [
         ("chix_strips_40", "Chicken Strips (40 pcs)",
          {"Chicken Strips (pcs)": 40},
@@ -184,6 +218,7 @@ ALACARTE_GROUPS = [
          {"Ketchup Packets": 10},
          {"Serving Tongs": 1}),
     ]),
+
     ("Beverages", [
         ("coffee_96oz", "Coffee Box (96 oz)",
          {"Coffee (oz)": 96},
@@ -198,25 +233,31 @@ ALACARTE_GROUPS = [
     ]),
 ]
 
-# Flattened lookup for alacarte
-ALACARTE_LOOKUP = {}
-ALACARTE_MENU = []
-for group, items in ALACARTE_GROUPS:
-    ALACARTE_MENU.append(("— " + group + " —", None))
-    for (item_id, label, food, packaging, condiments, serveware) in items:
+# Flatten for lookup + dropdown
+ALACARTE_LOOKUP: Dict[str, Dict] = {}
+ALACARTE_LABELS: List[str] = []
+ALACARTE_LABEL_TO_ID: Dict[str, str] = {}
+GROUPED_OPTIONS: List[str] = []  # For display only, but we’ll use a single selectbox list
+
+for group_name, items in ALACARTE_GROUPS:
+    # We'll simulate grouping by inserting a visual divider label (not selectable)
+    GROUPED_OPTIONS.append(f"— {group_name} —")
+    for item_id, label, food, packaging, condiments, serveware in items:
         ALACARTE_LOOKUP[item_id] = {
             "label": label,
             "food": food,
             "packaging": packaging,
             "condiments": condiments,
             "serveware": serveware,
-            "group": group,
+            "group": group_name,
         }
-        ALACARTE_MENU.append((label, item_id))
+        ALACARTE_LABELS.append(label)
+        ALACARTE_LABEL_TO_ID[label] = item_id
+        GROUPED_OPTIONS.append(label)
 
 
 # =========================================================
-# Helpers
+# Helper functions
 # =========================================================
 
 def dict_add(a: Dict[str, float], b: Dict[str, float]) -> Dict[str, float]:
@@ -233,9 +274,20 @@ def init_state():
         st.session_state.lines: List[OrderLine] = []
     if "edit_idx" not in st.session_state:
         st.session_state.edit_idx = None
+    if "combo_tier" not in st.session_state:
+        st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
+    if "combo_protein" not in st.session_state:
+        st.session_state.combo_protein = PROTEINS[0]
+    if "combo_griddle" not in st.session_state:
+        st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
+    if "combo_qty" not in st.session_state:
+        st.session_state.combo_qty = 1
+    if "al_label" not in st.session_state:
+        st.session_state.al_label = ALACARTE_LABELS[0]
+    if "al_qty" not in st.session_state:
+        st.session_state.al_qty = 1
 
 def merge_or_add_line(new_line: OrderLine):
-    """Merge identical line keys by summing quantity."""
     for i, line in enumerate(st.session_state.lines):
         if line.key == new_line.key:
             st.session_state.lines[i].qty += new_line.qty
@@ -247,6 +299,16 @@ def remove_line(idx: int):
     if st.session_state.edit_idx == idx:
         st.session_state.edit_idx = None
 
+def reset_combo_form():
+    st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]  # Small
+    st.session_state.combo_protein = PROTEINS[0]
+    st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
+    st.session_state.combo_qty = 1
+
+def reset_alacarte_form():
+    st.session_state.al_label = ALACARTE_LABELS[0]
+    st.session_state.al_qty = 1
+
 def build_totals(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float]]:
     total_food: Dict[str, float] = {}
     total_packaging: Dict[str, float] = {}
@@ -254,55 +316,52 @@ def build_totals(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str, fl
     total_serveware: Dict[str, float] = {}
 
     for line in lines:
-        qty = line.qty
+        qty = int(line.qty)
+
         if line.key.kind == "combo":
-            tier = line.key.item_id  # "Small Combo Box" etc
+            tier = line.key.item_id
             protein = line.key.protein
             griddle = line.key.griddle
-
             spec = COMBO_TIERS[tier]
+
             # Food: eggs + potatoes + chosen protein + chosen griddle
             base_food = {
                 "Scrambled Eggs (oz)": spec["food"]["Scrambled Eggs (oz)"],
                 "Breakfast Potatoes (oz)": spec["food"]["Breakfast Potatoes (oz)"],
-                "Protein (pcs)": spec["food"]["Protein (pcs)"],
             }
 
-            # Expand protein name into a specific bucket (helps later)
+            # Specific protein bucket
             if protein:
-                base_food = dict_add(base_food, {f"{protein.replace(' (20 pcs)','')} (pcs)": spec["food"]["Protein (pcs)"]})
+                base_food = dict_add(base_food, {f"{protein} (pcs)": spec["food"]["Protein (pcs)"]})
 
-            # Griddle choice
-            if griddle == "Buttermilk Pancakes (20 pcs)":
+            # Griddle bucket
+            if griddle == "Buttermilk Pancakes":
                 base_food = dict_add(base_food, {"Buttermilk Pancakes (pcs)": spec["food"]["Buttermilk Pancakes (pcs)"]})
-            elif griddle == "French Toast (10 pcs)":
+            elif griddle == "French Toast":
                 base_food = dict_add(base_food, {"French Toast (pcs)": spec["food"]["French Toast (pcs)"]})
 
-            # Packaging: eggs + potatoes + protein + chosen griddle
-            # Start with eggs + potatoes half pans, plus protein bases
-            # We reconstruct packaging per selection to avoid counting both griddles.
-            eggs_hp = {"Small Combo Box": 1, "Medium Combo Box": 2, "Large Combo Box": 4}[tier]
-            pot_hp = {"Small Combo Box": 1, "Medium Combo Box": 2, "Large Combo Box": 4}[tier]
-            protein_bases = {"Small Combo Box": 1, "Medium Combo Box": 2, "Large Combo Box": 4}[tier]
-            pancakes_hp = {"Small Combo Box": 1, "Medium Combo Box": 2, "Large Combo Box": 4}[tier]
-            french_toast_hp = {"Small Combo Box": 2, "Medium Combo Box": 4, "Large Combo Box": 8}[tier]
+            # Packaging: eggs + potatoes always, plus protein base, plus chosen griddle half pans
+            eggs_hp = spec["packaging_ref"]["Eggs Half Pans"]
+            pot_hp = spec["packaging_ref"]["Potatoes Half Pans"]
+            protein_bases = spec["packaging_ref"]["Protein Large Bases"]
+            pancakes_hp = spec["packaging_ref"]["Pancakes Half Pans"]
+            ft_hp = spec["packaging_ref"]["French Toast Half Pans"]
 
             packaging = {"Half Pans": eggs_hp + pot_hp, "Large Bases": protein_bases}
-            if griddle == "Buttermilk Pancakes (20 pcs)":
+            if griddle == "Buttermilk Pancakes":
                 packaging["Half Pans"] += pancakes_hp
-            elif griddle == "French Toast (10 pcs)":
-                packaging["Half Pans"] += french_toast_hp
+            elif griddle == "French Toast":
+                packaging["Half Pans"] += ft_hp
 
-            # Condiments: butter/syrup/ketchup always; powdered sugar only if french toast
+            # Condiments: butter/syrup/ketchup always; powdered sugar only for French toast
             cond = {
                 "Butter Packets": spec["condiments"]["Butter Packets"],
                 "Syrup Packets": spec["condiments"]["Syrup Packets"],
                 "Ketchup Packets": spec["condiments"]["Ketchup Packets"],
             }
-            if griddle == "French Toast (10 pcs)":
+            if griddle == "French Toast":
                 cond["Powdered Sugar Souffle (2 oz)"] = spec["condiments"]["Powdered Sugar Souffle (2 oz)"]
 
-            # Serveware from tier
             serve = dict(spec["serveware"])
 
             total_food = dict_add(total_food, dict_mul(base_food, qty))
@@ -317,11 +376,6 @@ def build_totals(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str, fl
             total_condiments = dict_add(total_condiments, dict_mul(spec["condiments"], qty))
             total_serveware = dict_add(total_serveware, dict_mul(spec["serveware"], qty))
 
-    # Clean up helper key if present
-    if "Protein (pcs)" in total_food:
-        # It's a generic helper. Keep the specific protein buckets.
-        total_food.pop("Protein (pcs)", None)
-
     return total_food, total_packaging, total_condiments, total_serveware
 
 
@@ -330,6 +384,9 @@ def build_totals(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str, fl
 # =========================================================
 
 init_state()
+
+st.title("IHOP Catering Calculator")
+st.caption("Simple dropdown entry for managers. Generates a single-page prep sheet with totals and a CSV download.")
 
 left, right = st.columns([1, 1])
 
@@ -342,43 +399,40 @@ with left:
     st.divider()
 
     st.markdown("### — Breakfast Combo Boxes —")
-    combo_tier = st.selectbox("Combo size", list(COMBO_TIERS.keys()), index=0)
-    combo_protein = st.selectbox("Protein", PROTEINS, index=0)
-    combo_griddle = st.selectbox("Griddle item", GRIDDLE_CHOICES, index=0)
-    combo_qty = st.number_input("Combo quantity", min_value=1, value=1, step=1)
+    combo_tier = st.selectbox("Combo size", list(COMBO_TIERS.keys()), index=list(COMBO_TIERS.keys()).index(st.session_state.combo_tier), key="combo_tier")
+    combo_protein = st.selectbox("Protein", PROTEINS, index=PROTEINS.index(st.session_state.combo_protein), key="combo_protein")
+    combo_griddle = st.selectbox("Griddle item", GRIDDLE_CHOICES, index=GRIDDLE_CHOICES.index(st.session_state.combo_griddle), key="combo_griddle")
+    combo_qty = st.number_input("Combo quantity", min_value=1, value=int(st.session_state.combo_qty), step=1, key="combo_qty")
 
-    add_combo = st.button("Add Combo", type="primary", use_container_width=True)
-    if add_combo:
-        label = f"{combo_tier} | {combo_protein.replace(' (20 pcs)','')} | {combo_griddle.split(' (')[0]}"
+    if st.button("Add Combo", type="primary", use_container_width=True):
+        label = f"{combo_tier} | {combo_protein} | {combo_griddle}"
         key = LineKey(kind="combo", item_id=combo_tier, protein=combo_protein, griddle=combo_griddle)
         merge_or_add_line(OrderLine(key=key, label=label, qty=int(combo_qty)))
-
-        # Reset behavior (per your spec)
-        st.session_state["_reset_combo"] = True
+        reset_combo_form()
         st.rerun()
-
-    # Reset combo selectors after add
-    if st.session_state.get("_reset_combo"):
-        st.session_state["_reset_combo"] = False
-        # Streamlit selectboxes reset only via key or rerun logic; we're already rerunning.
-        # We keep defaults (Small, first protein, first griddle). Quantity default is 1.
 
     st.divider()
 
     st.markdown("### — À La Carte Items —")
-    # Render grouped menu using a selectbox with labels; disabled "headers" won't be selectable,
-    # so we emulate by mapping labels->id and excluding headers from selection options.
-    alacarte_options = [label for (label, item_id) in ALACARTE_MENU if item_id is not None]
-    alacarte_label_to_id = {label: item_id for (label, item_id) in ALACARTE_MENU if item_id is not None}
 
-    alacarte_pick_label = st.selectbox("Select item", alacarte_options, index=0)
-    alacarte_qty = st.number_input("À la carte quantity", min_value=1, value=1, step=1)
+    # Show grouped list, but prevent selecting group headers by filtering in UI:
+    # We'll render a selectbox that includes only real item labels, and show a group legend above.
+    # (Streamlit selectbox can't truly disable options, so we keep the UX clean.)
+    # If you really want visible group headers inside the dropdown later, we can build a custom component.
+    st.caption("Tip: Items are grouped below; use the dropdown to select an item.")
+    group_help = []
+    for g, items in ALACARTE_GROUPS:
+        group_help.append(f"• {g} ({len(items)})")
+    st.caption("Groups: " + "  |  ".join(group_help))
 
-    add_alacarte = st.button("Add À La Carte", use_container_width=True)
-    if add_alacarte:
-        item_id = alacarte_label_to_id[alacarte_pick_label]
+    al_label = st.selectbox("Select item", ALACARTE_LABELS, index=ALACARTE_LABELS.index(st.session_state.al_label), key="al_label")
+    al_qty = st.number_input("À la carte quantity", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
+
+    if st.button("Add À La Carte", use_container_width=True):
+        item_id = ALACARTE_LABEL_TO_ID[al_label]
         key = LineKey(kind="alacarte", item_id=item_id)
-        merge_or_add_line(OrderLine(key=key, label=alacarte_pick_label, qty=int(alacarte_qty)))
+        merge_or_add_line(OrderLine(key=key, label=al_label, qty=int(al_qty)))
+        reset_alacarte_form()
         st.rerun()
 
 with right:
@@ -387,61 +441,51 @@ with right:
     if not st.session_state.lines:
         st.info("Add items on the left to build an order.")
     else:
-        # Display and allow edit/remove
         for idx, line in enumerate(st.session_state.lines):
-            row = st.container(border=True)
-            c1, c2, c3 = row.columns([6, 2, 2])
+            box = st.container(border=True)
+            c1, c2, c3 = box.columns([6, 2, 2])
 
             with c1:
                 st.markdown(f"**{line.label}**")
-
             with c2:
                 st.markdown(f"Qty: **{line.qty}**")
-
             with c3:
-                edit = st.button("Edit", key=f"edit_{idx}")
-                remove = st.button("Remove", key=f"remove_{idx}")
-
-            if remove:
-                remove_line(idx)
-                st.rerun()
-
-            if edit:
-                st.session_state.edit_idx = idx
-                st.rerun()
+                if st.button("Edit", key=f"edit_{idx}"):
+                    st.session_state.edit_idx = idx
+                    st.rerun()
+                if st.button("Remove", key=f"remove_{idx}"):
+                    remove_line(idx)
+                    st.rerun()
 
             if st.session_state.edit_idx == idx:
-                row2 = st.container(border=True)
-                st.markdown("**Edit Line**")
+                edit = st.container(border=True)
+                edit.markdown("**Edit Line**")
 
-                # Editable fields differ for combo vs alacarte
-                new_qty = row2.number_input("Quantity", min_value=1, value=int(line.qty), step=1, key=f"edit_qty_{idx}")
+                new_qty = edit.number_input("Quantity", min_value=1, value=int(line.qty), step=1, key=f"edit_qty_{idx}")
 
                 if line.key.kind == "combo":
-                    new_tier = row2.selectbox("Combo size", list(COMBO_TIERS.keys()),
-                                             index=list(COMBO_TIERS.keys()).index(line.key.item_id),
-                                             key=f"edit_tier_{idx}")
-                    new_protein = row2.selectbox("Protein", PROTEINS,
+                    new_tier = edit.selectbox("Combo size", list(COMBO_TIERS.keys()),
+                                              index=list(COMBO_TIERS.keys()).index(line.key.item_id),
+                                              key=f"edit_tier_{idx}")
+                    new_protein = edit.selectbox("Protein", PROTEINS,
                                                  index=PROTEINS.index(line.key.protein),
                                                  key=f"edit_protein_{idx}")
-                    new_griddle = row2.selectbox("Griddle item", GRIDDLE_CHOICES,
+                    new_griddle = edit.selectbox("Griddle item", GRIDDLE_CHOICES,
                                                  index=GRIDDLE_CHOICES.index(line.key.griddle),
                                                  key=f"edit_griddle_{idx}")
-                    new_label = f"{new_tier} | {new_protein.replace(' (20 pcs)','')} | {new_griddle.split(' (')[0]}"
+                    new_label = f"{new_tier} | {new_protein} | {new_griddle}"
                     new_key = LineKey(kind="combo", item_id=new_tier, protein=new_protein, griddle=new_griddle)
                 else:
-                    # Alacarte: choose a different item if needed
-                    al_labels = [l for (l, i) in ALACARTE_MENU if i is not None]
                     current_label = line.label
-                    default_index = al_labels.index(current_label) if current_label in al_labels else 0
-                    new_label = row2.selectbox("Item", al_labels, index=default_index, key=f"edit_al_{idx}")
-                    new_id = alacarte_label_to_id[new_label]
+                    default_index = ALACARTE_LABELS.index(current_label) if current_label in ALACARTE_LABELS else 0
+                    new_label = edit.selectbox("Item", ALACARTE_LABELS, index=default_index, key=f"edit_al_{idx}")
+                    new_id = ALACARTE_LABEL_TO_ID[new_label]
                     new_key = LineKey(kind="alacarte", item_id=new_id)
 
-                s1, s2 = row2.columns([1, 1])
+                s1, s2 = edit.columns(2)
                 if s1.button("Save", key=f"save_{idx}", type="primary"):
                     # Remove old line, then merge/add new
-                    old = st.session_state.lines.pop(idx)
+                    st.session_state.lines.pop(idx)
                     st.session_state.edit_idx = None
                     merge_or_add_line(OrderLine(key=new_key, label=new_label, qty=int(new_qty)))
                     st.rerun()
@@ -468,10 +512,9 @@ if not st.session_state.lines:
 else:
     total_food, total_packaging, total_condiments, total_serveware = build_totals(st.session_state.lines)
 
-    # Utensil recommendation logic (simple, per your spec)
     recommended_utensils = int(headcount) if headcount and headcount > 0 else 0
 
-    # Guardrail warning: combos + extra breakfast components a la carte
+    # Guardrail: combos + extra breakfast components
     has_combo = any(l.key.kind == "combo" for l in st.session_state.lines)
     has_breakfast_components = any(
         (l.key.kind == "alacarte" and l.key.item_id in {"eggs_40oz", "potatoes_40oz", "bacon_20", "psl_20", "ham_20"})
@@ -480,7 +523,7 @@ else:
     if has_combo and has_breakfast_components:
         st.warning("Quick check: You have Combo Boxes plus extra breakfast components à la carte. Totally fine if intentional.")
 
-    # Order Summary
+    # 1) Order Summary
     st.markdown("## 1) Order Summary")
     s1, s2, s3 = st.columns(3)
     s1.metric("Headcount", int(headcount))
@@ -497,28 +540,22 @@ else:
     elif headcount > 0 and ordered_utensils == 0:
         st.warning(f"No utensil count entered. Recommend ~{int(recommended_utensils)} utensil sets for headcount {int(headcount)}.")
 
-    # Food Totals
+    # 2) Food Totals
     st.markdown("## 2) Food Totals")
-    food_df = pd.DataFrame(
-        [{"Item": k, "Total": v} for k, v in sorted(total_food.items(), key=lambda x: x[0])]
-    )
+    food_df = pd.DataFrame([{"Item": k, "Total": v} for k, v in sorted(total_food.items(), key=lambda x: x[0])])
     st.dataframe(food_df, width="stretch", hide_index=True)
 
-    # Packaging Totals
+    # 3) Packaging Totals
     st.markdown("## 3) Packaging Totals")
-    pack_df = pd.DataFrame(
-        [{"Packaging": k, "Total": v} for k, v in sorted(total_packaging.items(), key=lambda x: x[0])]
-    )
+    pack_df = pd.DataFrame([{"Packaging": k, "Total": v} for k, v in sorted(total_packaging.items(), key=lambda x: x[0])])
     st.dataframe(pack_df, width="stretch", hide_index=True)
 
-    # Condiments
+    # 4) Condiments
     st.markdown("## 4) Condiments")
-    cond_df = pd.DataFrame(
-        [{"Condiment": k, "Total": v} for k, v in sorted(total_condiments.items(), key=lambda x: x[0])]
-    )
+    cond_df = pd.DataFrame([{"Condiment": k, "Total": v} for k, v in sorted(total_condiments.items(), key=lambda x: x[0])])
     st.dataframe(cond_df, width="stretch", hide_index=True)
 
-    # Serveware
+    # 5) Serveware
     st.markdown("## 5) Serveware")
     serve_items = dict(total_serveware)
     if ordered_utensils and ordered_utensils > 0:
@@ -526,28 +563,27 @@ else:
     if recommended_utensils and recommended_utensils > 0:
         serve_items["Utensil Sets (recommended)"] = int(recommended_utensils)
 
-    serve_df = pd.DataFrame(
-        [{"Serveware": k, "Total": v} for k, v in sorted(serve_items.items(), key=lambda x: x[0])]
-    )
+    serve_df = pd.DataFrame([{"Serveware": k, "Total": v} for k, v in sorted(serve_items.items(), key=lambda x: x[0])])
     st.dataframe(serve_df, width="stretch", hide_index=True)
 
     st.divider()
 
-    # Download Prep Sheet
+    # Download
     st.markdown("## Download")
     export_rows = []
 
-    def add_section(section: str, d: Dict[str, float], name_col: str):
+    def add_section(section: str, d: Dict[str, float]):
         for k, v in d.items():
-            export_rows.append({"Section": section, name_col: k, "Total": v})
+            export_rows.append({"Section": section, "Name": k, "Total": v})
 
-    add_section("Food", total_food, "Name")
-    add_section("Packaging", total_packaging, "Name")
-    add_section("Condiments", total_condiments, "Name")
-    add_section("Serveware", serve_items, "Name")
+    add_section("Food", total_food)
+    add_section("Packaging", total_packaging)
+    add_section("Condiments", total_condiments)
+    add_section("Serveware", serve_items)
 
     export_df = pd.DataFrame(export_rows)
     csv_bytes = export_df.to_csv(index=False).encode("utf-8")
+
     st.download_button(
         "Download Prep Sheet (CSV)",
         data=csv_bytes,
