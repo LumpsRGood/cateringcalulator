@@ -271,21 +271,26 @@ def dict_mul(d: Dict[str, float], n: int) -> Dict[str, float]:
 
 def init_state():
     if "lines" not in st.session_state:
-        st.session_state.lines: List[OrderLine] = []
+        st.session_state.lines = []
     if "edit_idx" not in st.session_state:
         st.session_state.edit_idx = None
-    if "combo_tier" not in st.session_state:
+
+    # Combo defaults
+    if "_reset_combo" in st.session_state and st.session_state._reset_combo:
         st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
-    if "combo_protein" not in st.session_state:
         st.session_state.combo_protein = PROTEINS[0]
-    if "combo_griddle" not in st.session_state:
         st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
-    if "combo_qty" not in st.session_state:
         st.session_state.combo_qty = 1
-    if "al_label" not in st.session_state:
-        st.session_state.al_label = ALACARTE_LABELS[0]
-    if "al_qty" not in st.session_state:
-        st.session_state.al_qty = 1
+        st.session_state._reset_combo = False
+    else:
+        st.session_state.setdefault("combo_tier", list(COMBO_TIERS.keys())[0])
+        st.session_state.setdefault("combo_protein", PROTEINS[0])
+        st.session_state.setdefault("combo_griddle", GRIDDLE_CHOICES[0])
+        st.session_state.setdefault("combo_qty", 1)
+
+    # À la carte defaults
+    st.session_state.setdefault("al_label", ALACARTE_LABELS[0])
+    st.session_state.setdefault("al_qty", 1)
 
 def merge_or_add_line(new_line: OrderLine):
     for i, line in enumerate(st.session_state.lines):
@@ -300,10 +305,7 @@ def remove_line(idx: int):
         st.session_state.edit_idx = None
 
 def reset_combo_form():
-    st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]  # Small
-    st.session_state.combo_protein = PROTEINS[0]
-    st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
-    st.session_state.combo_qty = 1
+    st.session_state._reset_combo = True
 
 def reset_alacarte_form():
     st.session_state.al_label = ALACARTE_LABELS[0]
