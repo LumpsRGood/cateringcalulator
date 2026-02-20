@@ -525,13 +525,77 @@ def apply_guest_requested_toggles(
 # =========================================================
 # Prep formatting helpers (Food Prep Totals)
 # =========================================================
+def bag_and_portion_line_from_oz(
+    name: str,
+    total_oz: float,
+    portion_oz: float,
+    bag_lb: float,
+) -> str:
+    """
+    Formats like:
+    - Under 1 bag: "Red Pots: 60 oz (10 portions / 3.75 lb)"
+    - Over 1 bag:  "Red Pots: 1 bag PLUS 30 oz (5 portions / 1.88 lb)"
+    Never shows "<1 bag".
+    """
+    if not total_oz:
+        return ""
+
+    total_lb = ounces_to_lbs(total_oz)
+    total_portions = int(round(total_oz / portion_oz))  # should be clean numbers from SOP
+
+    full_bags = int(total_lb // bag_lb)
+    rem_lb = total_lb - (full_bags * bag_lb)
+    rem_oz = rem_lb * 16
+
+    # Under 1 bag
+    if full_bags == 0:
+        return f"{name}: {int(total_oz)} oz ({total_portions} portions / {total_lb:.2f} lb)"
+
+    # Exact bag count (no remainder)
+    if rem_oz <= 0.01:
+        bag_word = "bag" if full_bags == 1 else "bags"
+        return f"{name}: {full_bags} {bag_word}"
+
+    rem_portions = int(round(rem_oz / portion_oz))
+    bag_word = "bag" if full_bags == 1 else "bags"
+    return f"{name}: {full_bags} {bag_word} PLUS {int(round(rem_oz))} oz ({rem_portions} portions / {rem_lb:.2f} lb)"
+
 def eggs_prep_line_from_oz(eggs_oz: float) -> str:
-    # Inferred conversion earlier: ~0.465 qt per lb
-    lbs = ounces_to_lbs(eggs_oz)
-    quarts = lbs * 0.465
-    quarts_r = friendly_round_up(quarts, inc=0.5, tiny_over=0.05)
-    cambros_4qt = quarts_r / 4.0
-    return f"Scrambled Eggs: {quarts_r:g} qt (≈ {cambros_4qt:.1f} of a 4-qt Cambro)"
+    """
+    Eggs are packed as 20 lb bags (2/20lb case). We show:
+    - Under 1 bag: total quarts
+    - Over 1 bag: X bag(s) PLUS Y qt
+    Round quarts to 0.5 increments per your rule.
+    """
+    if not eggs_oz:
+        return ""
+
+    total_lb = ounces_to_lbs(eggs_oz)
+
+    BAG_LB = 20.0
+    QT_PER_LB = 0.465  # same conversion we used earlier
+
+    full_bags = int(total_lb // BAG_LB)
+    rem_lb = total_lb - (full_bags * BAG_LB)
+
+    # Convert remainder to quarts and round to 0.5 increments (err toward guest)
+    rem_qt = rem_lb * QT_PER_LB
+    rem_qt_r = friendly_round_up(rem_qt, inc=0.5, tiny_over=0.05)
+
+    # If no full bags, show total quarts only
+    total_qt = total_lb * QT_PER_LB
+    total_qt_r = friendly_round_up(total_qt, inc=0.5, tiny_over=0.05)
+
+    if full_bags == 0:
+        return f"Scrambled Eggs: {total_qt_r:g} qt"
+
+    # If remainder rounds to 0, it’s clean bags
+    if rem_qt_r <= 0:
+        bag_word = "bag" if full_bags == 1 else "bags"
+        return f"Scrambled Eggs: {full_bags} {bag_word}"
+
+    bag_word = "bag" if full_bags == 1 else "bags"
+    return f"Scrambled Eggs: {full_bags} {bag_word} PLUS {rem_qt_r:g} qt"
 
 
 def oz_line(label: str, oz: float) -> str:
@@ -547,14 +611,31 @@ def build_food_prep_lines(food: Dict[str, float]) -> List[str]:
     if eggs_oz:
         lines.append(eggs_prep_line_from_oz(eggs_oz))
 
+    # Red Pots: 6 oz portion, 6 lb bag
     rp_oz = food.get(f"{POTATOES_NAME} (oz)", 0)
     if rp_oz:
-        lines.append(oz_line(POTATOES_NAME, rp_oz))
+        lines.append(
+            bag_and_portion_line_from_oz(
+                name=POTATOES_NAME,
+                total_oz=rp_oz,
+                portion_oz=6.0,
+                bag_lb=6.0,
+            )
+        )
 
+    # Fries: 6 oz portion, 6 lb bag
     fries_oz = food.get("French Fries (oz)", 0)
     if fries_oz:
-        lines.append(oz_line("French Fries", fries_oz))
+        lines.append(
+            bag_and_portion_line_from_oz(
+                name="French Fries",
+                total_oz=fries_oz,
+                portion_oz=6.0,
+                bag_lb=6.0,
+            )
+        )
 
+    # Keep the rest of your counts as-is
     count_keys = [
         "Buttermilk Pancakes (pcs)",
         "French Toast (slices)",
