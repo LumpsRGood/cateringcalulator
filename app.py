@@ -16,7 +16,7 @@ from reportlab.lib.utils import simpleSplit
 # App Meta
 # =========================================================
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v3.0.0"
+APP_VERSION = "v3.0.1"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -74,87 +74,13 @@ def _norm(s: Optional[str]) -> str:
 
 
 def build_canon_id(key: LineKey) -> str:
-    # Canonical, stable ID used to merge identical items
     if key.kind == "combo":
         return "combo|" + "|".join([_norm(key.item_id), _norm(key.protein), _norm(key.griddle)])
-
     if key.kind in ("main", "alacarte"):
         if _norm(key.item_id) == "cold_beverage":
             return f"{key.kind}|cold_beverage|" + _norm(key.beverage_type)
         return f"{key.kind}|" + _norm(key.item_id)
-
     return _norm(key.kind) + "|" + _norm(key.item_id)
-
-
-def init_state():
-    if "lines" not in st.session_state:
-        st.session_state.lines: List[OrderLine] = []
-    if "edit_idx" not in st.session_state:
-        st.session_state.edit_idx = None
-
-    st.session_state.setdefault("_reset_combo", False)
-    st.session_state.setdefault("_reset_main", False)
-    st.session_state.setdefault("_reset_alacarte", False)
-
-    # Defaults for widgets
-    if st.session_state._reset_combo:
-        st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
-        st.session_state.combo_protein = PROTEINS[0]
-        st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
-        st.session_state.combo_qty = 1
-        st.session_state._reset_combo = False
-    else:
-        st.session_state.setdefault("combo_tier", list(COMBO_TIERS.keys())[0])
-        st.session_state.setdefault("combo_protein", PROTEINS[0])
-        st.session_state.setdefault("combo_griddle", GRIDDLE_CHOICES[0])
-        st.session_state.setdefault("combo_qty", 1)
-
-    if st.session_state._reset_main:
-        st.session_state.main_item = MAIN_LABELS[0]
-        st.session_state.main_qty = 1
-        st.session_state.cold_bev_type_main = COLD_BEV_TYPES[0]
-        st.session_state._reset_main = False
-    else:
-        st.session_state.setdefault("main_item", MAIN_LABELS[0])
-        st.session_state.setdefault("main_qty", 1)
-        st.session_state.setdefault("cold_bev_type_main", COLD_BEV_TYPES[0])
-
-    if st.session_state._reset_alacarte:
-        st.session_state.al_item = ALACARTE_LABELS[0]
-        st.session_state.al_qty = 1
-        st.session_state._reset_alacarte = False
-    else:
-        st.session_state.setdefault("al_item", ALACARTE_LABELS[0])
-        st.session_state.setdefault("al_qty", 1)
-
-    st.session_state.setdefault("pickup_date", datetime.now().date())
-    st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
-
-
-def merge_or_add_line(new_line: OrderLine):
-    for i, line in enumerate(st.session_state.lines):
-        if getattr(line, "canon_id", "") == new_line.canon_id:
-            st.session_state.lines[i].qty += new_line.qty
-            return
-    st.session_state.lines.append(new_line)
-
-
-def remove_line(idx: int):
-    st.session_state.lines.pop(idx)
-    if st.session_state.edit_idx == idx:
-        st.session_state.edit_idx = None
-
-
-def reset_combo_form():
-    st.session_state._reset_combo = True
-
-
-def reset_main_form():
-    st.session_state._reset_main = True
-
-
-def reset_alacarte_form():
-    st.session_state._reset_alacarte = True
 
 
 # =========================================================
@@ -174,28 +100,23 @@ GRIDDLE_CHOICES = ["Buttermilk Pancakes", "French Toast"]
 # =========================================================
 COMBO_TIERS = {
     "Small Combo Box": {
-        # FOOD (kitchen)
         "eggs_oz": 40,
         "red_pots_oz": 60,
         "protein_pcs": 20,
         "pancakes_pcs": 20,
         "ft_slices": 10,
-        # PACKAGING
         "half_pans_eggs": 1,
         "half_pans_red_pots": 1,
         "ihop_large_bases_protein": 1,
         "half_pans_pancakes": 1,
         "half_pans_ft": 2,
-        # CONDIMENTS (packets)
         "butter_packets": 10,
         "syrup_packets": 10,
         "ketchup_packets": 10,
         "powdered_sugar_cups_2oz": 1,  # 1 cup per 10 slices
-        # SERVICE UTENSILS
         "serving_forks": 2,
         "serving_tongs": 2,
         "serving_spoons": 0,
-        # GUESTWARE
         "paper_plates": 10,
     },
     "Medium Combo Box": {
@@ -241,9 +162,7 @@ COMBO_TIERS = {
 }
 
 # =========================================================
-# MAIN (non-combo) items
-# - Sandwich toppings & sauces are NOT selectable; they are auto-attached here.
-# - Beverage bag is NOT selectable; cold beverage selection auto-attaches pouch + cups/lids/straws.
+# MAIN items
 # =========================================================
 COLD_BEV_TYPES = ["Apple Juice", "Orange Juice", "Iced Tea", "Lemonade", "Soda"]
 
@@ -260,8 +179,6 @@ MAIN_LABEL_TO_ID = {label: item_id for item_id, label in MAIN_ITEMS}
 
 # =========================================================
 # À LA CARTE (hidden unless expanded)
-# - Keep truly optional extras here.
-# - No standalone toppings kits, no beverage bags.
 # =========================================================
 ALACARTE_GROUPS = [
     ("Griddle (Optional)", [
@@ -291,6 +208,84 @@ for group_name, items in ALACARTE_GROUPS:
         ALACARTE_LABELS.append(label)
         AL_LABEL_TO_ID[label] = item_id
 
+
+# =========================================================
+# Session state
+# =========================================================
+def init_state():
+    if "lines" not in st.session_state:
+        st.session_state.lines: List[OrderLine] = []
+    if "edit_idx" not in st.session_state:
+        st.session_state.edit_idx = None
+
+    st.session_state.setdefault("_reset_combo", False)
+    st.session_state.setdefault("_reset_main", False)
+    st.session_state.setdefault("_reset_alacarte", False)
+
+    # Sidebar form defaults
+    if st.session_state._reset_combo:
+        st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
+        st.session_state.combo_protein = PROTEINS[0]
+        st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
+        st.session_state.combo_qty = 1
+        st.session_state._reset_combo = False
+    else:
+        st.session_state.setdefault("combo_tier", list(COMBO_TIERS.keys())[0])
+        st.session_state.setdefault("combo_protein", PROTEINS[0])
+        st.session_state.setdefault("combo_griddle", GRIDDLE_CHOICES[0])
+        st.session_state.setdefault("combo_qty", 1)
+
+    if st.session_state._reset_main:
+        st.session_state.main_item = MAIN_LABELS[0]
+        st.session_state.main_qty = 1
+        st.session_state.cold_bev_type_main = COLD_BEV_TYPES[0]
+        st.session_state._reset_main = False
+    else:
+        st.session_state.setdefault("main_item", MAIN_LABELS[0])
+        st.session_state.setdefault("main_qty", 1)
+        st.session_state.setdefault("cold_bev_type_main", COLD_BEV_TYPES[0])
+
+    if st.session_state._reset_alacarte:
+        st.session_state.al_item = ALACARTE_LABELS[0]
+        st.session_state.al_qty = 1
+        st.session_state._reset_alacarte = False
+    else:
+        st.session_state.setdefault("al_item", ALACARTE_LABELS[0])
+        st.session_state.setdefault("al_qty", 1)
+
+    # Main-page timing/counts defaults
+    st.session_state.setdefault("pickup_date", datetime.now().date())
+    st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
+    st.session_state.setdefault("headcount", 0)
+    st.session_state.setdefault("utensils_ordered", 0)
+
+
+def merge_or_add_line(new_line: OrderLine):
+    for i, line in enumerate(st.session_state.lines):
+        if getattr(line, "canon_id", "") == new_line.canon_id:
+            st.session_state.lines[i].qty += new_line.qty
+            return
+    st.session_state.lines.append(new_line)
+
+
+def remove_line(idx: int):
+    st.session_state.lines.pop(idx)
+    if st.session_state.edit_idx == idx:
+        st.session_state.edit_idx = None
+
+
+def reset_combo_form():
+    st.session_state._reset_combo = True
+
+
+def reset_main_form():
+    st.session_state._reset_main = True
+
+
+def reset_alacarte_form():
+    st.session_state._reset_alacarte = True
+
+
 # =========================================================
 # Buckets
 # =========================================================
@@ -314,16 +309,13 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
     for line in lines:
         qty = int(line.qty)
 
-        # -------------------------
         # Combo Boxes
-        # -------------------------
         if line.key.kind == "combo":
             tier = line.key.item_id
             protein = line.key.protein
             griddle = line.key.griddle
             spec = COMBO_TIERS[tier]
 
-            # FOOD
             F("Scrambled Eggs (oz)", spec["eggs_oz"] * qty)
             F(f"{POTATOES_NAME} (oz)", spec["red_pots_oz"] * qty)
 
@@ -345,30 +337,23 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                 P("Aluminum ½ Pans", spec["half_pans_ft"] * qty)
                 C("Powdered Sugar Cups (2 oz)", spec["powdered_sugar_cups_2oz"] * qty)
 
-            # PACKAGING for eggs/pots
             P("Aluminum ½ Pans", (spec["half_pans_eggs"] + spec["half_pans_red_pots"]) * qty)
 
-            # CONDIMENTS
             C("Butter Packets", spec["butter_packets"] * qty)
             C("Syrup Packets", spec["syrup_packets"] * qty)
             C("Ketchup Packets", spec["ketchup_packets"] * qty)
 
-            # SERVICE UTENSILS
             S("Serving Tongs", spec["serving_tongs"] * qty)
             S("Serving Forks", spec["serving_forks"] * qty)
             if spec.get("serving_spoons", 0) > 0:
                 S("Serving Spoons", spec["serving_spoons"] * qty)
 
-            # GUESTWARE
             G("Paper Plates", spec["paper_plates"] * qty)
 
-        # -------------------------
-        # MAIN items (Sandwiches, Strips, Beverages)
-        # -------------------------
+        # Main items (sandwiches, strips, beverages)
         elif line.key.kind == "main":
             item = line.key.item_id
 
-            # Sandwiches (always 10s)
             if item in ("steakburgers_10", "crispy_chx_sand_10", "grilled_chx_sand_10"):
                 if item == "steakburgers_10":
                     F("Steakburger Patties (pcs)", 10 * qty)
@@ -376,39 +361,31 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                     F("Chicken Sandwiches (pcs)", 10 * qty)
 
                 F("Buns (pcs)", 10 * qty)
-
-                # toppings (food prep)
                 F("Tomato Slices (pcs)", 20 * qty)
                 F("Red Onion Rings (pcs)", 20 * qty)
                 F("Lettuce Leaves (pcs)", 10 * qty)
                 F("Pickle Chips (pcs)", 50 * qty)
 
-                # packaging
-                P("Aluminum ½ Pans", 2 * qty)      # sandwiches + toppings
-                P("Soup Cups (8 oz)", 3 * qty)     # IHOP + BBQ + pickles
+                P("Aluminum ½ Pans", 2 * qty)     # sandwiches + toppings
+                P("Soup Cups (8 oz)", 3 * qty)    # IHOP + BBQ + pickles
 
-                # guestware
                 G("Paper Plates", 10 * qty)
 
-                # service utensils
                 S("Serving Tongs", 2 * qty)
                 S("Serving Spoons", 2 * qty)
 
-                # condiment packets
                 C("Mayo Packets", 10 * qty)
                 C("Ketchup Packets", 10 * qty)
                 C("Mustard Packets", 10 * qty)
 
-            # Chicken Strips (serves 10, 40 pcs)
             elif item == "chicken_strips_40":
                 F("Chicken Strips (pcs)", 40 * qty)
                 P("Aluminum ½ Pans", 1 * qty)
-                P("Soup Cups (8 oz)", 3 * qty)  # BBQ + IHOP + Ranch
+                P("Soup Cups (8 oz)", 3 * qty)    # BBQ + IHOP + Ranch
                 G("Paper Plates", 10 * qty)
                 S("Serving Tongs", 1 * qty)
                 S("Serving Spoons", 3 * qty)
 
-            # Cold Beverage (128 oz)
             elif item == "cold_beverage":
                 bev = line.key.beverage_type or "Cold Beverage"
                 F(f"Cold Beverage (128 oz) - {bev}", 1 * qty)
@@ -417,7 +394,6 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                 G("Cold Lids", 10 * qty)
                 G("Straws", 10 * qty)
 
-            # Coffee Box (96 oz)
             elif item == "coffee_box":
                 F("Coffee Box (96 oz)", 1 * qty)
                 P("Hot Beverage Containers", 1 * qty)
@@ -428,15 +404,12 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                 C("Sugar Packets", 10 * qty)
                 C("Creamers", 10 * qty)
 
-        # -------------------------
-        # À LA CARTE items
-        # -------------------------
+        # À la carte
         elif line.key.kind == "alacarte":
             spec = ALACARTE_LOOKUP[line.key.item_id]["payload"]
 
             if "pancakes_pcs" in spec:
                 F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
-                # Treat 20 pcs like two 10s (operational, additive)
                 P("Aluminum ½ Pans", 2 * qty)
                 G("Paper Plates", 20 * qty)
                 C("Butter Packets", 20 * qty)
@@ -445,7 +418,7 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
 
             if "ft_slices" in spec:
                 F("French Toast (slices)", spec["ft_slices"] * qty)
-                P("Aluminum ½ Pans", 2 * qty)  # per SOP for 10 slices
+                P("Aluminum ½ Pans", 2 * qty)
                 G("Paper Plates", 10 * qty)
                 C("Butter Packets", 10 * qty)
                 C("Syrup Packets", 10 * qty)
@@ -493,7 +466,6 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
 # Prep formatting helpers (Food Prep Totals)
 # =========================================================
 def eggs_prep_line_from_oz(eggs_oz: float) -> str:
-    # Inferred conversion earlier: ~0.465 qt per lb
     lbs = ounces_to_lbs(eggs_oz)
     quarts = lbs * 0.465
     quarts_r = friendly_round_up(quarts, inc=0.5, tiny_over=0.05)
@@ -704,88 +676,86 @@ def generate_day_of_pdf(
 
 
 # =========================================================
-# UI
+# App Start
 # =========================================================
 init_state()
 
 st.title(f"{APP_NAME} {APP_VERSION}")
 st.caption("Operational mode. Additive math. No SKUs. Toppings and beverage packaging are automatic.")
 
-with st.container():
+# =========================================================
+# SIDEBAR: Build Order + Current Order (Order Summary)
+# =========================================================
+with st.sidebar:
     st.subheader("Build Order")
 
-    st.markdown("### Timing")
-    st.date_input("Pickup date", key="pickup_date")
-    st.time_input("Pickup time", key="pickup_time")
-    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
-
-    t1, t2 = st.columns(2)
-    t1.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
-    t2.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
-
-    st.divider()
-
-    headcount = st.number_input("Headcount (if provided)", min_value=0, value=0, step=1)
-    ordered_utensils = st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=0, step=1)
-
-    st.divider()
-
     # Combos
-    st.markdown("### — Breakfast Combo Boxes —")
-    combo_tier = st.selectbox("Combo size", list(COMBO_TIERS.keys()), key="combo_tier")
-    combo_protein = st.selectbox("Protein", PROTEINS, key="combo_protein")
-    combo_griddle = st.selectbox("Griddle item", GRIDDLE_CHOICES, key="combo_griddle")
-    combo_qty = st.number_input("Combo quantity", min_value=1, value=int(st.session_state.combo_qty), step=1, key="combo_qty")
+    st.markdown("**Breakfast Combo Boxes**")
+    st.selectbox("Combo size", list(COMBO_TIERS.keys()), key="combo_tier")
+    st.selectbox("Protein", PROTEINS, key="combo_protein")
+    st.selectbox("Griddle item", GRIDDLE_CHOICES, key="combo_griddle")
+    st.number_input("Combo quantity", min_value=1, value=int(st.session_state.combo_qty), step=1, key="combo_qty")
 
     if st.button("Add Combo", type="primary", use_container_width=True):
-        label = f"{combo_tier} | {combo_protein} | {combo_griddle}"
-        key = LineKey(kind="combo", item_id=combo_tier, protein=combo_protein, griddle=combo_griddle)
+        tier = st.session_state.combo_tier
+        protein = st.session_state.combo_protein
+        griddle = st.session_state.combo_griddle
+        qty = int(st.session_state.combo_qty)
+        label = f"{tier} | {protein} | {griddle}"
+        key = LineKey(kind="combo", item_id=tier, protein=protein, griddle=griddle)
         canon_id = build_canon_id(key)
-        merge_or_add_line(OrderLine(key=key, label=label, qty=int(combo_qty), canon_id=canon_id))
+        merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
         reset_combo_form()
         st.rerun()
 
     st.divider()
 
     # Main items
-    st.markdown("### — Sandwiches, Strips, Beverages —")
-    main_item_label = st.selectbox("Select item", MAIN_LABELS, key="main_item")
-    main_qty = st.number_input("Quantity", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty")
+    st.markdown("**Sandwiches, Strips, Beverages**")
+    st.selectbox("Select item", MAIN_LABELS, key="main_item")
+    st.number_input("Quantity", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty")
 
-    main_item_id = MAIN_LABEL_TO_ID[main_item_label]
+    main_item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
     if main_item_id == "cold_beverage":
-        st.selectbox("Cold beverage type", COLD_BEV_TYPES, index=0, key="cold_bev_type_main")
+        st.selectbox("Cold beverage type", COLD_BEV_TYPES, key="cold_bev_type_main")
 
-    if st.button("Add Item", use_container_width=True):
-        item_id = MAIN_LABEL_TO_ID[main_item_label]
+    # Make this button match Add Combo
+    if st.button("Add Item", type="primary", use_container_width=True):
+        item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
+        qty = int(st.session_state.main_qty)
+
         if item_id == "cold_beverage":
             bev_type = st.session_state.get("cold_bev_type_main", COLD_BEV_TYPES[0])
-            label = f"{main_item_label} | {bev_type}"
+            label = f"{st.session_state.main_item} | {bev_type}"
             key = LineKey(kind="main", item_id=item_id, beverage_type=bev_type)
         else:
-            label = main_item_label
+            label = st.session_state.main_item
             key = LineKey(kind="main", item_id=item_id)
 
         canon_id = build_canon_id(key)
-        merge_or_add_line(OrderLine(key=key, label=label, qty=int(main_qty), canon_id=canon_id))
+        merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
         reset_main_form()
         st.rerun()
 
-    # À La Carte expander
+    # Yellow callout (no CSS hacks)
+    st.warning("➕ Optional: Add À La Carte Items if needed", icon="⚠️")
+
     with st.expander("➕ Need to add À La Carte Items? (Optional)", expanded=False):
-        al_item = st.selectbox("À la carte item", ALACARTE_LABELS, key="al_item")
-        al_qty = st.number_input("À la carte quantity", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
+        st.selectbox("À la carte item", ALACARTE_LABELS, key="al_item")
+        st.number_input("À la carte quantity", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
 
         if st.button("Add À La Carte", use_container_width=True):
-            item_id = AL_LABEL_TO_ID[al_item]
-            label = al_item
+            item_id = AL_LABEL_TO_ID[st.session_state.al_item]
+            qty = int(st.session_state.al_qty)
+            label = st.session_state.al_item
             key = LineKey(kind="alacarte", item_id=item_id)
             canon_id = build_canon_id(key)
-            merge_or_add_line(OrderLine(key=key, label=label, qty=int(al_qty), canon_id=canon_id))
+            merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
             reset_alacarte_form()
             st.rerun()
 
-with st.sidebar:
+    st.divider()
+
     st.subheader("Current Order")
 
     if not st.session_state.lines:
@@ -800,17 +770,25 @@ with st.sidebar:
                 st.caption(f"Qty: {line.qty}")
 
             with c2:
+                # stacked buttons (one per line in the sidebar)
                 if st.button("✏️", key=f"edit_{idx}", help="Edit item"):
                     st.session_state.edit_idx = idx
                     st.rerun()
-                if st.button("🗑️", key=f"remove_{idx}", help="Remove item", type="secondary"):
+                if st.button("🗑️", key=f"remove_{idx}", help="Remove item"):
                     remove_line(idx)
                     st.rerun()
 
+            # Edit panel
             if st.session_state.edit_idx == idx:
                 edit = st.container(border=True)
                 edit.markdown("**Edit Line**")
-                new_qty = edit.number_input("Quantity", min_value=1, value=int(line.qty), step=1, key=f"edit_qty_{idx}")
+                new_qty = edit.number_input(
+                    "Quantity",
+                    min_value=1,
+                    value=int(line.qty),
+                    step=1,
+                    key=f"edit_qty_{idx}",
+                )
 
                 if line.key.kind == "combo":
                     new_tier = edit.selectbox(
@@ -837,7 +815,12 @@ with st.sidebar:
                 elif line.key.kind == "main":
                     base_label = line.label.split(" | ", 1)[0] if " | " in line.label else line.label
                     default_index = MAIN_LABELS.index(base_label) if base_label in MAIN_LABELS else 0
-                    new_main_label = edit.selectbox("Item", MAIN_LABELS, index=default_index, key=f"edit_main_{idx}")
+                    new_main_label = edit.selectbox(
+                        "Item",
+                        MAIN_LABELS,
+                        index=default_index,
+                        key=f"edit_main_{idx}",
+                    )
                     new_item_id = MAIN_LABEL_TO_ID[new_main_label]
                     if new_item_id == "cold_beverage":
                         existing_bev = line.key.beverage_type or COLD_BEV_TYPES[0]
@@ -856,7 +839,12 @@ with st.sidebar:
                 else:  # alacarte
                     base_label = line.label
                     default_index = ALACARTE_LABELS.index(base_label) if base_label in ALACARTE_LABELS else 0
-                    new_al_label = edit.selectbox("Item", ALACARTE_LABELS, index=default_index, key=f"edit_al_{idx}")
+                    new_al_label = edit.selectbox(
+                        "Item",
+                        ALACARTE_LABELS,
+                        index=default_index,
+                        key=f"edit_al_{idx}",
+                    )
                     new_item_id = AL_LABEL_TO_ID[new_al_label]
                     new_label = new_al_label
                     new_key = LineKey(kind="alacarte", item_id=new_item_id)
@@ -880,38 +868,52 @@ with st.sidebar:
             st.session_state.edit_idx = None
             st.rerun()
 
+
+# =========================================================
+# MAIN PAGE: Timing (col1) + Headcount (col2)
+# =========================================================
+c1, c2 = st.columns(2)
+
+with c1:
+    st.subheader("Timing")
+    st.date_input("Pickup date", key="pickup_date")
+    st.time_input("Pickup time", key="pickup_time")
+    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
+    st.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
+    st.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
+
+with c2:
+    st.subheader("Headcount")
+    st.number_input("Headcount (if provided)", min_value=0, value=int(st.session_state.headcount), step=1, key="headcount")
+    st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=int(st.session_state.utensils_ordered), step=1, key="utensils_ordered")
+
+    headcount = int(st.session_state.headcount)
+    utensils_ordered = int(st.session_state.utensils_ordered)
+    if headcount > 0:
+        st.caption(f"Utensil sets recommended: {headcount}")
+        if utensils_ordered > 0 and utensils_ordered < headcount:
+            st.error(f"Utensil mismatch: ordered {utensils_ordered} but headcount is {headcount}.")
+
 st.divider()
 
+# =========================================================
+# OUTPUT + PDF
+# =========================================================
 st.subheader("Day-Of Output")
 
 if not st.session_state.lines:
-    st.caption("Build an order above to generate the day-of sheet.")
+    st.caption("Build an order in the left sidebar to generate the day-of sheet.")
 else:
     food, packaging, guestware, service, cond = compute_buckets(st.session_state.lines)
-    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
 
-    st.markdown("## 1) Order Summary")
-    for ol in st.session_state.lines:
-        st.write(f"• {ol.label} (Qty {ol.qty})")
-
-    st.markdown("### Counts")
-    st.write(f"• Headcount: {int(headcount)}")
-    st.write(f"• Utensil sets ordered: {int(ordered_utensils)}")
-    if headcount > 0:
-        st.write(f"• Utensil sets recommended: {int(headcount)}")
-        if ordered_utensils > 0 and ordered_utensils < headcount:
-            st.error(f"Utensil mismatch: ordered {int(ordered_utensils)} but headcount is {int(headcount)}.")
-
-    st.divider()
-
-    st.markdown("## 2) Food Prep Totals")
+    st.markdown("## Food Prep Totals")
     prep_lines = build_food_prep_lines(food)
     for line in prep_lines or ["None"]:
         st.write(f"• {line}")
 
     st.divider()
 
-    st.markdown("## 3) Packaging")
+    st.markdown("## Packaging")
     pack_rows = []
     for k in ["Aluminum ½ Pans", "IHOP Large Plastic Base", "Soup Cups (8 oz)", "Beverage Pouches", "Hot Beverage Containers"]:
         v = packaging.get(k, 0)
@@ -922,7 +924,7 @@ else:
     else:
         st.caption("None")
 
-    st.markdown("## 4) Plates & Cups")
+    st.markdown("## Plates & Cups")
     guest_rows = []
     for k in ["Paper Plates", "Cold Cups", "Cold Lids", "Hot Cups", "Hot Lids", "Sleeves", "Straws", "Stirrers"]:
         v = guestware.get(k, 0)
@@ -933,18 +935,7 @@ else:
     else:
         st.caption("None")
 
-    st.markdown("## 5) Service Utensils")
-    serv_rows = []
-    for k in ["Serving Tongs", "Serving Spoons", "Serving Forks"]:
-        v = service.get(k, 0)
-        if v:
-            serv_rows.append({"Utensil": k, "Total": int(v)})
-    if serv_rows:
-        st.dataframe(pd.DataFrame(serv_rows), width="stretch", hide_index=True)
-    else:
-        st.caption("None")
-
-    st.markdown("## 6) Condiment Bag")
+    st.markdown("## Condiment Bag")
     cond_rows = []
     for k in ["Butter Packets", "Syrup Packets", "Ketchup Packets", "Mustard Packets", "Mayo Packets",
               "Sugar Packets", "Creamers", "Powdered Sugar Cups (2 oz)"]:
@@ -956,15 +947,28 @@ else:
     else:
         st.caption("None")
 
+    st.markdown("## Service Utensils")
+    serv_rows = []
+    for k in ["Serving Tongs", "Serving Spoons", "Serving Forks"]:
+        v = service.get(k, 0)
+        if v:
+            serv_rows.append({"Utensil": k, "Total": int(v)})
+    if serv_rows:
+        st.dataframe(pd.DataFrame(serv_rows), width="stretch", hide_index=True)
+    else:
+        st.caption("None")
+
     st.divider()
 
     st.subheader("Print / PDF")
+    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
+
     pdf_bytes = generate_day_of_pdf(
         order_lines=st.session_state.lines,
         pickup_dt=pickup_dt,
         ready_dt=ready_dt,
-        headcount=int(headcount),
-        utensils_ordered=int(ordered_utensils),
+        headcount=int(st.session_state.headcount),
+        utensils_ordered=int(st.session_state.utensils_ordered),
         food=food,
         packaging=packaging,
         guestware=guestware,
