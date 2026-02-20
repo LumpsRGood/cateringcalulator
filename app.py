@@ -1,6 +1,7 @@
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -9,7 +10,7 @@ import streamlit as st
 # App Meta
 # =========================================================
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v2.0.0"
+APP_VERSION = "v2.0.1"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -35,19 +36,7 @@ class OrderLine:
 # =========================================================
 # Helpers
 # =========================================================
-def dict_add(a: Dict[str, float], b: Dict[str, float]) -> Dict[str, float]:
-    out = dict(a)
-    for k, v in b.items():
-        out[k] = out.get(k, 0) + v
-    return out
-
-
-def dict_mul(d: Dict[str, float], n: int) -> Dict[str, float]:
-    return {k: v * n for k, v in d.items()}
-
-
 def ceil_to_increment(x: float, inc: float) -> float:
-    """Round up to nearest increment."""
     return math.ceil(x / inc) * inc
 
 
@@ -98,6 +87,10 @@ def init_state():
         st.session_state.setdefault("al_item", ALACARTE_LABELS[0])
         st.session_state.setdefault("al_qty", 1)
 
+    # Order meta defaults
+    st.session_state.setdefault("pickup_date", datetime.now().date())
+    st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
+
 
 def merge_or_add_line(new_line: OrderLine):
     for i, line in enumerate(st.session_state.lines):
@@ -119,6 +112,12 @@ def reset_combo_form():
 
 def reset_alacarte_form():
     st.session_state._reset_alacarte = True
+
+
+def compute_pickup_and_ready(pickup_date, pickup_time) -> (datetime, datetime):
+    pickup_dt = datetime.combine(pickup_date, pickup_time)
+    ready_dt = pickup_dt - timedelta(minutes=10)
+    return pickup_dt, ready_dt
 
 
 # =========================================================
@@ -246,7 +245,7 @@ ALACARTE_GROUPS = [
     ("Lunch / Savory", [
         ("chix_strips_40", "Chicken Strips (40 pcs)", {"chix_strips_pcs": 40}),
         ("fries_60oz", "French Fries (60 oz)", {"fries_oz": 60}),
-        ("onion_rings_std", "Onion Rings (prep by ring count)", {"onion_rings_from_oz": 60}),  # legacy spec conversion anchor
+        ("onion_rings_std", "Onion Rings (prep by ring count)", {"onion_rings_from_oz": 60}),  # legacy anchor
     ]),
     ("Burgers & Chicken (10 pcs)", [
         ("steakburgers_10", "Steakburgers (10 pcs)", {"steakburgers_pcs": 10, "auto_buns": 10, "auto_cond_burger": 10}),
@@ -255,7 +254,7 @@ ALACARTE_GROUPS = [
     ]),
     ("Beverages", [
         ("coffee_box", "Coffee Box (96 oz)", {"coffee_boxes": 1}),
-        ("cold_bag", "Cold Beverage Bag (128 oz)", {"cold_bags": 1}),  # beverage_type is captured in key
+        ("cold_bag", "Cold Beverage Bag (128 oz)", {"cold_bags": 1}),  # beverage_type in key
     ]),
 ]
 
@@ -270,16 +269,9 @@ for group_name, items in ALACARTE_GROUPS:
         AL_LABEL_TO_ID[label] = item_id
 
 # =========================================================
-# Conversions / totals building
+# Totals building
 # =========================================================
 def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
-    """
-    Returns canonical totals in kitchen units:
-    - eggs_oz, red_pots_oz, pancakes_pcs, ft_slices, bacon_pcs, sausage_pcs, ham_pcs,
-      chix_strips_pcs, fries_oz, onion_rings_rings, steakburgers_pcs,
-      buns_ct, mayo_ct, ketchup_ct, mustard_ct, syrup_ct, butter_ct,
-      powdered_sugar_cups_2oz, coffee_boxes, coffee_packs, cold_bags_{type}, etc.
-    """
     totals: Dict[str, float] = {}
 
     def add(k: str, v: float):
@@ -294,11 +286,9 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
             griddle = line.key.griddle
             spec = COMBO_TIERS[tier]
 
-            # core
             add("eggs_oz", spec["eggs_oz"] * qty)
             add("red_pots_oz", spec["red_pots_oz"] * qty)
 
-            # protein pcs -> specific buckets
             if protein == "Bacon":
                 add("bacon_pcs", spec["protein_pcs"] * qty)
             elif protein == "Pork Sausage Links":
@@ -306,25 +296,20 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
             elif protein == HAM_NAME:
                 add("ham_pcs", spec["protein_pcs"] * qty)
 
-            # griddle selection
             if griddle == "Buttermilk Pancakes":
                 add("pancakes_pcs", spec["pancakes_pcs"] * qty)
             else:
                 add("ft_slices", spec["ft_slices"] * qty)
                 add("powdered_sugar_cups_2oz", spec["powdered_sugar_cups_2oz"] * qty)
 
-            # condiments (always)
             add("butter_ct", spec["butter_packets"] * qty)
             add("syrup_ct", spec["syrup_packets"] * qty)
             add("ketchup_ct", spec["ketchup_packets"] * qty)
 
-            # serveware (count only, no SKU impact for now)
             add("serving_forks", spec["serving_forks"] * qty)
             add("serving_tongs", spec["serving_tongs"] * qty)
             add("plates", spec["plates"] * qty)
 
-            # packaging (count only)
-            # Only count the chosen griddle pans
             add("half_pans", (spec["half_pans_eggs"] + spec["half_pans_red_pots"]) * qty)
             add("large_bases", spec["large_bases_protein"] * qty)
             if griddle == "Buttermilk Pancakes":
@@ -335,26 +320,20 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
         else:
             spec = ALACARTE_LOOKUP[line.key.item_id]["payload"]
 
-            # pancakes
             if "pancakes_pcs" in spec:
                 add("pancakes_pcs", spec["pancakes_pcs"] * qty)
 
-            # french toast slices
             if "ft_slices" in spec:
                 add("ft_slices", spec["ft_slices"] * qty)
-                # powdered sugar: 1 (2oz) cup per 10 slices
                 cups = (spec["ft_slices"] * qty) / 10.0
-                add("powdered_sugar_cups_2oz", math.ceil(cups))  # always err on guest here
+                add("powdered_sugar_cups_2oz", math.ceil(cups - 1e-9))
 
-            # eggs
             if "eggs_oz" in spec:
                 add("eggs_oz", spec["eggs_oz"] * qty)
 
-            # red pots
             if "red_pots_oz" in spec:
                 add("red_pots_oz", spec["red_pots_oz"] * qty)
 
-            # proteins (pcs)
             if "bacon_pcs" in spec:
                 add("bacon_pcs", spec["bacon_pcs"] * qty)
             if "sausage_pcs" in spec:
@@ -362,29 +341,22 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
             if "ham_pcs" in spec:
                 add("ham_pcs", spec["ham_pcs"] * qty)
 
-            # chicken strips
             if "chix_strips_pcs" in spec:
                 add("chix_strips_pcs", spec["chix_strips_pcs"] * qty)
 
-            # fries
             if "fries_oz" in spec:
                 add("fries_oz", spec["fries_oz"] * qty)
-                # serveware / packaging counts (count-only)
                 add("half_pans", 1 * qty)
                 add("serving_tongs", 1 * qty)
                 add("ketchup_ct", 10 * qty)
 
-            # onion rings (count-based output, but we convert from legacy 60oz anchor)
             if "onion_rings_from_oz" in spec:
-                # Convert legacy 60oz spec -> rings via oz_per_ring
                 rings = (spec["onion_rings_from_oz"] * qty) / SKU["onion_rings"]["oz_per_ring"]
-                add("onion_rings_rings", math.ceil(rings))  # err on guest: round up rings
-
+                add("onion_rings_rings", math.ceil(rings - 1e-9))
                 add("half_pans", 2 * qty)
                 add("serving_tongs", 1 * qty)
                 add("ketchup_ct", 10 * qty)
 
-            # burgers / sandwiches
             if "steakburgers_pcs" in spec:
                 add("steakburgers_pcs", spec["steakburgers_pcs"] * qty)
             if "auto_buns" in spec:
@@ -394,19 +366,16 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
                 add("mayo_ct", n)
                 add("ketchup_ct", n)
                 add("mustard_ct", n)
-                # plates/tongs/spoons count-only per original guide vibe
                 add("serving_tongs", 2 * qty)
                 add("spoons", 2 * qty)
                 add("plates", 10 * qty)
 
-            # coffee
             if "coffee_boxes" in spec:
                 boxes = spec["coffee_boxes"] * qty
                 add("coffee_boxes", boxes)
                 add("coffee_packs", boxes * SKU["coffee_pack"]["packs_per_coffee_box"])
                 add("coffee_boxes_packaging", boxes)
 
-            # cold beverage bag
             if "cold_bags" in spec:
                 bags = spec["cold_bags"] * qty
                 bev_type = line.key.beverage_type or "Unknown"
@@ -419,8 +388,7 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
 # Prep language formatting helpers (for output)
 # =========================================================
 def eggs_prep_line(eggs_oz: float) -> str:
-    # Convert oz -> quarts (assume ~2.15 lb/qt based on your accepted inference)
-    # 1 lb ~ 0.465 qt
+    # Convert oz -> quarts (accepted inference): ~0.465 qt per lb
     lbs = ounces_to_lbs(eggs_oz)
     quarts = lbs * 0.465
     quarts_r = friendly_round_up(quarts, inc=0.5, tiny_over=0.05)
@@ -433,19 +401,17 @@ def bag_overflow_line(total_oz: float, oz_per_bag: float, oz_per_portion: Option
     Show:
     - Always: total oz (portions / lbs)
     - Only if > 1 bag: "Open: X bag(s) PLUS Y oz (Z portions / lbs)"
-    For under 1 bag, we do NOT show '<1 bag' (per your rule).
+    For under 1 bag, we do NOT show bag text (per your rule).
     """
-    portions_txt = ""
     lbs = ounces_to_lbs(total_oz)
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05) if lbs > 0 else 0
+
     if oz_per_portion:
         portions = total_oz / oz_per_portion
         portions_int = int(math.ceil(portions - 1e-9))
-        portions_txt = f"{portions_int} portions / {lbs_r:g} lb"
+        main = f"{label}: {int(total_oz)} oz ({portions_int} portions/{lbs_r:g} lb)"
     else:
-        portions_txt = f"{lbs_r:g} lb"
-
-    main = f"{label}: {int(total_oz)} oz ({portions_txt})"
+        main = f"{label}: {int(total_oz)} oz ({lbs_r:g} lb)"
 
     if total_oz <= oz_per_bag + 1e-9:
         return main
@@ -460,7 +426,7 @@ def bag_overflow_line(total_oz: float, oz_per_bag: float, oz_per_portion: Option
         rem_portions_int = int(math.ceil(rem_portions - 1e-9))
         return (
             f"{main}\n\nOpen: {full_bags} bag{'s' if full_bags != 1 else ''} PLUS "
-            f"{int(rem_oz)} oz ({rem_portions_int} portions / {rem_lbs_r:g} lb)"
+            f"{int(rem_oz)} oz ({rem_portions_int} portions/{rem_lbs_r:g} lb)"
         )
 
     return (
@@ -469,25 +435,49 @@ def bag_overflow_line(total_oz: float, oz_per_bag: float, oz_per_portion: Option
     )
 
 
+def red_pots_prep_line(total_oz: float) -> str:
+    return bag_overflow_line(
+        total_oz=total_oz,
+        oz_per_bag=SKU["red_pots"]["lbs_per_bag"] * 16,
+        oz_per_portion=SKU["fries"]["oz_per_portion"],
+        label=POTATOES_NAME
+    )
+
+
+def fries_prep_line(total_oz: float) -> str:
+    return bag_overflow_line(
+        total_oz=total_oz,
+        oz_per_bag=SKU["fries"]["lbs_per_bag"] * 16,
+        oz_per_portion=SKU["fries"]["oz_per_portion"],
+        label="French Fries"
+    )
+
+
 def bacon_prep_line(bacon_pcs: float) -> str:
-    # 9 slices per lb (from 225 slices per 25lb case)
+    # 9 slices per lb
     lbs = bacon_pcs / 9.0
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
     return f"Bacon: {int(bacon_pcs)} slices ({lbs_r:g} lb)"
 
 
 def sausage_prep_line(sausage_pcs: float) -> str:
-    # 1 link = 0.8 oz => 20 links per lb
+    # 20 links per lb
     lbs = sausage_pcs / 20.0
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
     return f"Pork Sausage Links: {int(sausage_pcs)} links ({lbs_r:g} lb)"
 
 
 def ham_prep_line(ham_pcs: float) -> str:
-    # 1 pc = 1 oz (quarter slice)
+    # 1 pc = 1 oz
     lbs = ounces_to_lbs(ham_pcs * 1.0)
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
     return f"{HAM_NAME}: {int(ham_pcs)} pcs ({lbs_r:g} lb)"
+
+
+def chicken_strips_prep_line(pcs: float) -> str:
+    lbs = ounces_to_lbs(pcs * SKU["chicken_strips"]["oz_per_piece"])
+    lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
+    return f"Chicken Strips: {int(pcs)} pcs ({lbs_r:g} lb)"
 
 
 def pancakes_prep_line(pancakes_pcs: float) -> str:
@@ -502,32 +492,6 @@ def onion_rings_prep_line(rings: float) -> str:
     return f"Onion Rings: {int(rings)} rings"
 
 
-def fries_prep_line(total_oz: float) -> str:
-    return bag_overflow_line(
-        total_oz=total_oz,
-        oz_per_bag=SKU["fries"]["lbs_per_bag"] * 16,
-        oz_per_portion=SKU["fries"]["oz_per_portion"],
-        label="French Fries"
-    )
-
-
-def red_pots_prep_line(total_oz: float) -> str:
-    # Red Pots are bagged 6 lb (96 oz). Portioning: same as fries (6 oz) but they "dump and roll".
-    # Still useful to show portions + lb.
-    return bag_overflow_line(
-        total_oz=total_oz,
-        oz_per_bag=SKU["red_pots"]["lbs_per_bag"] * 16,
-        oz_per_portion=SKU["fries"]["oz_per_portion"],
-        label=POTATOES_NAME
-    )
-
-
-def chicken_strips_prep_line(pcs: float) -> str:
-    lbs = ounces_to_lbs(pcs * SKU["chicken_strips"]["oz_per_piece"])
-    lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
-    return f"Chicken Strips: {int(pcs)} pcs ({lbs_r:g} lb)"
-
-
 def powdered_sugar_prep_line(cups: float) -> str:
     return f"Powdered Sugar: {int(cups)} (2 oz) cups"
 
@@ -536,44 +500,31 @@ def powdered_sugar_prep_line(cups: float) -> str:
 # Inventory Impact (separate frame)
 # =========================================================
 def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
-    """
-    Returns list of rows:
-    - Item, SKU, Impact
-    Only for items triggered by this order.
-    """
-    rows = []
+    rows: List[Dict[str, str]] = []
 
     def add_row(item: str, sku: str, impact: str):
         rows.append({"Item": item, "SKU": sku, "Impact": impact})
 
-    # Eggs: show quarts + fraction bag/case
     eggs_oz = totals.get("eggs_oz", 0)
     if eggs_oz > 0:
         lbs = ounces_to_lbs(eggs_oz)
         quarts = lbs * 0.465
         quarts_r = friendly_round_up(quarts, inc=0.5, tiny_over=0.05)
-
         bag_lbs = SKU["eggs"]["lbs_per_unit"]
         bag_fraction = lbs / bag_lbs
         case_fraction = lbs / (SKU["eggs"]["units_per_case"] * bag_lbs)
-        add_row(
-            "Scrambled Eggs",
-            SKU["eggs"]["sku"],
-            f"{quarts_r:g} qt (≈ {bag_fraction:.2f} bag, {case_fraction:.2f} case)"
-        )
+        add_row("Scrambled Eggs", SKU["eggs"]["sku"], f"{quarts_r:g} qt (≈ {bag_fraction:.2f} bag, {case_fraction:.2f} case)")
 
-    # Red Pots: bag logic with overflow
     rp_oz = totals.get("red_pots_oz", 0)
     if rp_oz > 0:
         bag_oz = SKU["red_pots"]["lbs_per_bag"] * 16
         full_bags = int(rp_oz // bag_oz)
         rem_oz = rp_oz - full_bags * bag_oz
         if full_bags == 0:
-            add_row(POTATOES_NAME, SKU["red_pots"]["sku"], f"{int(rp_oz)} oz total (no full bag needed)")
+            add_row(POTATOES_NAME, SKU["red_pots"]["sku"], f"{int(rp_oz)} oz total")
         else:
             add_row(POTATOES_NAME, SKU["red_pots"]["sku"], f"Open {full_bags} bag(s) + {int(rem_oz)} oz")
 
-    # Bacon: case fraction (25 lb case)
     bacon_pcs = totals.get("bacon_pcs", 0)
     if bacon_pcs > 0:
         lbs = bacon_pcs / 9.0
@@ -581,7 +532,6 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         case_fraction = lbs / SKU["bacon"]["lbs_per_case"]
         add_row("Bacon", SKU["bacon"]["sku"], f"{lbs_r:g} lb (≈ {case_fraction:.2f} case)")
 
-    # Sausage: bag usage
     sausage_pcs = totals.get("sausage_pcs", 0)
     if sausage_pcs > 0:
         lbs = sausage_pcs / 20.0
@@ -589,7 +539,6 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         bag_fraction = lbs / SKU["sausage"]["lbs_per_bag"]
         add_row("Pork Sausage Links", SKU["sausage"]["sku"], f"{lbs_r:g} lb (≈ {bag_fraction:.2f} bag)")
 
-    # Sampler Ham: packs usage (3 lb packs)
     ham_pcs = totals.get("ham_pcs", 0)
     if ham_pcs > 0:
         lbs = ounces_to_lbs(ham_pcs * 1.0)
@@ -597,7 +546,6 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         pack_fraction = lbs / SKU["ham"]["lbs_per_pack"]
         add_row(HAM_NAME, SKU["ham"]["sku"], f"{lbs_r:g} lb (≈ {pack_fraction:.2f} pack)")
 
-    # Pancake mix: 738 pancakes per 45 lb bag => ~16.4 pancakes/lb
     pancakes = totals.get("pancakes_pcs", 0)
     if pancakes > 0:
         lbs_mix = pancakes / (738.0 / 45.0)
@@ -605,22 +553,17 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         bag_fraction = lbs_mix / SKU["pancake_mix"]["lbs_per_bag"]
         add_row("Pancake Mix", SKU["pancake_mix"]["sku"], f"{lbs_mix_r:g} lb mix (≈ {bag_fraction:.2f} bag)")
 
-    # French toast bread: slices -> loaves (9 slices/loaf)
     ft_slices = totals.get("ft_slices", 0)
     if ft_slices > 0:
-        loaves = ft_slices / SKU["ft_bread"]["slices_per_loaf"]
-        loaves_needed = int(math.ceil(loaves - 1e-9))
+        loaves_needed = int(math.ceil(ft_slices / SKU["ft_bread"]["slices_per_loaf"] - 1e-9))
         add_row("French Toast Bread", SKU["ft_bread"]["sku"], f"{int(ft_slices)} slices → {loaves_needed} loaf/loaves")
 
-    # Powdered sugar bulk -> 2oz cups
     ps_cups = totals.get("powdered_sugar_cups_2oz", 0)
     if ps_cups > 0:
-        # 1 bag = 2 lb = 32 oz -> 16 cups
         cups_per_bag = (SKU["powdered_sugar"]["lbs_per_bag"] * 16) / SKU["powdered_sugar"]["oz_per_cup"]
         bags_needed = int(math.ceil(ps_cups / cups_per_bag - 1e-9))
         add_row("Powdered Sugar", SKU["powdered_sugar"]["sku"], f"{int(ps_cups)} cups (2 oz) → {bags_needed} bag(s)")
 
-    # Chicken Strips: pieces -> lbs -> bags (5 lb bags)
     strips = totals.get("chix_strips_pcs", 0)
     if strips > 0:
         lbs = ounces_to_lbs(strips * SKU["chicken_strips"]["oz_per_piece"])
@@ -628,30 +571,26 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         bags_needed = int(math.ceil(lbs / SKU["chicken_strips"]["lbs_per_bag"] - 1e-9))
         add_row("Chicken Strips", SKU["chicken_strips"]["sku"], f"{lbs_r:g} lb → {bags_needed} bag(s)")
 
-    # Fries: oz -> bag overflow (6 lb bags)
     fries_oz = totals.get("fries_oz", 0)
     if fries_oz > 0:
         bag_oz = SKU["fries"]["lbs_per_bag"] * 16
         full_bags = int(fries_oz // bag_oz)
         rem_oz = fries_oz - full_bags * bag_oz
         if full_bags == 0:
-            add_row("French Fries", SKU["fries"]["sku"], f"{int(fries_oz)} oz total (no full bag needed)")
+            add_row("French Fries", SKU["fries"]["sku"], f"{int(fries_oz)} oz total")
         else:
             add_row("French Fries", SKU["fries"]["sku"], f"Open {full_bags} bag(s) + {int(rem_oz)} oz")
 
-    # Onion Rings: rings -> bags (2.5 lb bag ≈ 40 oz => 32 rings/bag)
     rings = totals.get("onion_rings_rings", 0)
     if rings > 0:
         rings_per_bag = int((SKU["onion_rings"]["lbs_per_bag"] * 16) / SKU["onion_rings"]["oz_per_ring"])
-        bags = rings / rings_per_bag
         full_bags = int(rings // rings_per_bag)
         rem = int(rings - full_bags * rings_per_bag)
         if full_bags == 0:
-            add_row("Onion Rings", SKU["onion_rings"]["sku"], f"{int(rings)} rings total (no full bag needed)")
+            add_row("Onion Rings", SKU["onion_rings"]["sku"], f"{int(rings)} rings total")
         else:
             add_row("Onion Rings", SKU["onion_rings"]["sku"], f"Open {full_bags} bag(s) + {rem} rings")
 
-    # Steakburgers + buns
     burg = totals.get("steakburgers_pcs", 0)
     if burg > 0:
         case_fraction = burg / SKU["steakburgers"]["patties_per_case"]
@@ -662,7 +601,6 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         case_fraction = buns / SKU["burger_buns"]["buns_per_case"]
         add_row("Burger Buns", SKU["burger_buns"]["sku"], f"{int(buns)} buns (≈ {case_fraction:.2f} case)")
 
-    # Condiment packets
     if totals.get("mayo_ct", 0) > 0:
         add_row("Mayo Packets", SKU["mayo_packets"]["sku"], f"{int(totals['mayo_ct'])} packets")
     if totals.get("ketchup_ct", 0) > 0:
@@ -674,13 +612,12 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
     if totals.get("butter_ct", 0) > 0:
         add_row("Butter Packets", SKU["butter_packets"]["sku"], f"{int(totals['butter_ct'])} packets")
 
-    # Coffee packs
     if totals.get("coffee_packs", 0) > 0:
         packs = int(totals["coffee_packs"])
         case_fraction = packs / SKU["coffee_pack"]["packs_per_case"]
         add_row("Coffee Packs", SKU["coffee_pack"]["sku"], f"{packs} packs (≈ {case_fraction:.2f} case)")
 
-    # Cold beverage bags by type: inventory only for OJ and AJ
+    # Only inventory impact for OJ and AJ
     for k, v in totals.items():
         if not k.startswith("cold_bags::"):
             continue
@@ -693,9 +630,6 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
         elif bev_type == "Apple Juice":
             bottles = math.ceil(oz_needed / SKU["aj"]["oz_per_bottle"] - 1e-9)
             add_row("Apple Juice for Cold Bags", SKU["aj"]["sku"], f"{bags} bag(s) → {bottles} bottle(s)")
-        else:
-            # No inventory impact required
-            continue
 
     return rows
 
@@ -708,10 +642,24 @@ init_state()
 st.title(f"{APP_NAME} {APP_VERSION}")
 st.caption("Manager-friendly dropdown entry. Prep totals + plating reference + inventory impact.")
 
-left, right = st.columns([1, 1])
+# Build Order on main page, Current Order in sidebar (sticky)
+main, _ = st.columns([1, 1])
 
-with left:
+with main:
     st.subheader("Build Order")
+
+    # Pickup and Ready time (Ready is auto = Pickup - 10 min)
+    st.markdown("### Timing")
+    pickup_date = st.date_input("Pickup date", key="pickup_date")
+    pickup_time = st.time_input("Pickup time", key="pickup_time")
+
+    pickup_dt, ready_dt = compute_pickup_and_ready(pickup_date, pickup_time)
+
+    t1, t2 = st.columns(2)
+    t1.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
+    t2.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
+
+    st.divider()
 
     headcount = st.number_input("Headcount (if provided)", min_value=0, value=0, step=1)
     ordered_utensils = st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=0, step=1)
@@ -735,7 +683,6 @@ with left:
     al_item = st.selectbox("Select item", ALACARTE_LABELS, key="al_item")
     al_qty = st.number_input("À la carte quantity", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
 
-    # Only show beverage type selector if cold beverage bag selected
     al_id = AL_LABEL_TO_ID[al_item]
     bev_type = None
     if al_id == "cold_bag":
@@ -755,21 +702,20 @@ with left:
         reset_alacarte_form()
         st.rerun()
 
-with right:
+with st.sidebar:
     st.subheader("Current Order")
 
     if not st.session_state.lines:
-        st.info("Add items on the left to build an order.")
+        st.info("Add items to build an order.")
     else:
         for idx, line in enumerate(st.session_state.lines):
             box = st.container(border=True)
-            c1, c2, c3 = box.columns([6, 2, 2])
+            c1, c2 = box.columns([5, 2])
 
             with c1:
                 st.markdown(f"**{line.label}**")
+                st.caption(f"Qty: {line.qty}")
             with c2:
-                st.markdown(f"Qty: **{line.qty}**")
-            with c3:
                 if st.button("Edit", key=f"edit_{idx}"):
                     st.session_state.edit_idx = idx
                     st.rerun()
@@ -783,24 +729,30 @@ with right:
                 new_qty = edit.number_input("Quantity", min_value=1, value=int(line.qty), step=1, key=f"edit_qty_{idx}")
 
                 if line.key.kind == "combo":
-                    new_tier = edit.selectbox("Combo size", list(COMBO_TIERS.keys()),
-                                              index=list(COMBO_TIERS.keys()).index(line.key.item_id),
-                                              key=f"edit_tier_{idx}")
-                    new_protein = edit.selectbox("Protein", PROTEINS,
-                                                 index=PROTEINS.index(line.key.protein),
-                                                 key=f"edit_protein_{idx}")
-                    new_griddle = edit.selectbox("Griddle item", GRIDDLE_CHOICES,
-                                                 index=GRIDDLE_CHOICES.index(line.key.griddle),
-                                                 key=f"edit_griddle_{idx}")
+                    new_tier = edit.selectbox(
+                        "Combo size",
+                        list(COMBO_TIERS.keys()),
+                        index=list(COMBO_TIERS.keys()).index(line.key.item_id),
+                        key=f"edit_tier_{idx}",
+                    )
+                    new_protein = edit.selectbox(
+                        "Protein",
+                        PROTEINS,
+                        index=PROTEINS.index(line.key.protein),
+                        key=f"edit_protein_{idx}",
+                    )
+                    new_griddle = edit.selectbox(
+                        "Griddle item",
+                        GRIDDLE_CHOICES,
+                        index=GRIDDLE_CHOICES.index(line.key.griddle),
+                        key=f"edit_griddle_{idx}",
+                    )
                     new_label = f"{new_tier} | {new_protein} | {new_griddle}"
                     new_key = LineKey(kind="combo", item_id=new_tier, protein=new_protein, griddle=new_griddle)
 
                 else:
-                    # alacarte edit
-                    # If it's a cold bag, allow editing beverage type too
-                    al_labels = ALACARTE_LABELS
-                    # For cold bags, label includes " | type" so we normalize for selection
                     current_base_label = line.label.split(" | ", 1)[0] if " | " in line.label else line.label
+                    al_labels = ALACARTE_LABELS
                     default_index = al_labels.index(current_base_label) if current_base_label in al_labels else 0
 
                     new_label_base = edit.selectbox("Item", al_labels, index=default_index, key=f"edit_al_{idx}")
@@ -808,11 +760,13 @@ with right:
 
                     new_bev = None
                     if new_item_id == "cold_bag":
-                        # retain current bev if present
                         existing_bev = line.key.beverage_type or COLD_BEV_TYPES[0]
-                        new_bev = edit.selectbox("Cold beverage type", COLD_BEV_TYPES,
-                                                 index=COLD_BEV_TYPES.index(existing_bev),
-                                                 key=f"edit_bev_{idx}")
+                        new_bev = edit.selectbox(
+                            "Cold beverage type",
+                            COLD_BEV_TYPES,
+                            index=COLD_BEV_TYPES.index(existing_bev),
+                            key=f"edit_bev_{idx}",
+                        )
                         new_label = f"{new_label_base} | {new_bev}"
                         new_key = LineKey(kind="alacarte", item_id=new_item_id, beverage_type=new_bev)
                     else:
@@ -848,13 +802,20 @@ if not st.session_state.lines:
 else:
     totals = compute_order_totals(st.session_state.lines)
 
+    # Recompute pickup/ready for output
+    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
+
     # ---- Order Summary
     st.markdown("## 1) Order Summary")
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
+    c2.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
+    c3.metric("Headcount", int(headcount))
+    c4.metric("Utensil sets ordered", int(ordered_utensils))
+
     recommended_utensils = int(headcount) if headcount and headcount > 0 else 0
-    c1.metric("Headcount", int(headcount))
-    c2.metric("Utensil sets ordered", int(ordered_utensils))
-    c3.metric("Utensil sets recommended", int(recommended_utensils))
+    if headcount > 0:
+        st.caption(f"Utensil sets recommended: {recommended_utensils}")
 
     if headcount > 0 and ordered_utensils > 0:
         if ordered_utensils < headcount:
@@ -897,24 +858,19 @@ else:
     if totals.get("powdered_sugar_cups_2oz", 0) > 0:
         prep_lines.append(powdered_sugar_prep_line(totals["powdered_sugar_cups_2oz"]))
 
-    # Beverages
     if totals.get("coffee_boxes", 0) > 0:
         boxes = int(totals["coffee_boxes"])
         packs = int(totals.get("coffee_packs", 0))
         prep_lines.append(f"Coffee: {boxes} box(es) (brew packs: {packs})")
 
-    # Cold bags
     for k, v in totals.items():
         if k.startswith("cold_bags::"):
             bev = k.split("::", 1)[1]
             bags = int(v)
             prep_lines.append(f"Cold Beverage Bag: {bags} bag(s) | {bev} ({bags * COLD_BEV_OZ} oz total)")
 
-    if prep_lines:
-        for line in prep_lines:
-            st.write("• " + line)
-    else:
-        st.caption("No food items found in this order.")
+    for line in prep_lines:
+        st.write("• " + line)
 
     # ---- Packaging Totals (count-only)
     st.markdown("## 3) Packaging Totals")
@@ -960,7 +916,6 @@ else:
         if totals.get(key, 0) > 0:
             serve_rows.append({"Serveware": label, "Total": int(totals[key])})
 
-    # Utensils ordered vs recommended
     if ordered_utensils and ordered_utensils > 0:
         serve_rows.append({"Serveware": "Utensil Sets (ordered)", "Total": int(ordered_utensils)})
     if recommended_utensils and recommended_utensils > 0:
@@ -983,6 +938,7 @@ else:
         plating_lines.append(f"Onion Rings: {int(totals['onion_rings_rings'])} rings")
     if totals.get("steakburgers_pcs", 0) > 0:
         plating_lines.append(f"Steakburgers: {int(totals['steakburgers_pcs'])} assembled")
+
     if plating_lines:
         for line in plating_lines:
             st.write("• " + line)
@@ -1002,17 +958,19 @@ else:
     st.divider()
     st.markdown("## Download")
 
-    export_rows = []
+    export_rows: List[Dict[str, str]] = []
 
-    # Order lines
+    export_rows.append({"Section": "Order Meta", "Name": "Ready time", "Total": ready_dt.isoformat(sep=" ", timespec="minutes")})
+    export_rows.append({"Section": "Order Meta", "Name": "Pickup time", "Total": pickup_dt.isoformat(sep=" ", timespec="minutes")})
+    export_rows.append({"Section": "Order Meta", "Name": "Headcount", "Total": str(int(headcount))})
+    export_rows.append({"Section": "Order Meta", "Name": "Utensil sets ordered", "Total": str(int(ordered_utensils))})
+
     for line in st.session_state.lines:
-        export_rows.append({"Section": "Order Lines", "Name": line.label, "Total": line.qty})
+        export_rows.append({"Section": "Order Lines", "Name": line.label, "Total": str(line.qty)})
 
-    # Totals snapshot
     for k, v in sorted(totals.items(), key=lambda x: x[0]):
-        export_rows.append({"Section": "Computed Totals", "Name": k, "Total": v})
+        export_rows.append({"Section": "Computed Totals", "Name": k, "Total": str(v)})
 
-    # Inventory rows
     for r in inv_rows:
         export_rows.append({"Section": "Inventory Impact", "Name": f"{r['Item']} (SKU {r['SKU']})", "Total": r["Impact"]})
 
