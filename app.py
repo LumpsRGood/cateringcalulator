@@ -16,7 +16,7 @@ from reportlab.lib.utils import simpleSplit
 # App Meta
 # =========================================================
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v2.0.3"
+APP_VERSION = "v2.0.4"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -37,6 +37,7 @@ class OrderLine:
     key: LineKey
     label: str
     qty: int
+    canon_id: str
 
 
 # =========================================================
@@ -66,6 +67,28 @@ def compute_pickup_and_ready(pickup_date, pickup_time) -> Tuple[datetime, dateti
     pickup_dt = datetime.combine(pickup_date, pickup_time)
     ready_dt = pickup_dt - timedelta(minutes=10)
     return pickup_dt, ready_dt
+
+
+def _norm(s: Optional[str]) -> str:
+    # stable normalization (prevents invisible differences)
+    return (s or "").strip().lower()
+
+
+def build_canon_id(key: LineKey) -> str:
+    # Canonical, stable ID used to merge identical items
+    if key.kind == "combo":
+        return "combo|" + "|".join([
+            _norm(key.item_id),
+            _norm(key.protein),
+            _norm(key.griddle),
+        ])
+
+    if key.kind == "alacarte":
+        if _norm(key.item_id) == "cold_bag":
+            return "alacarte|cold_bag|" + _norm(key.beverage_type)
+        return "alacarte|" + _norm(key.item_id)
+
+    return _norm(key.kind) + "|" + _norm(key.item_id)
 
 
 def init_state():
@@ -103,8 +126,9 @@ def init_state():
 
 
 def merge_or_add_line(new_line: OrderLine):
+    # Merge by canonical ID (stable)
     for i, line in enumerate(st.session_state.lines):
-        if line.key == new_line.key:
+        if getattr(line, "canon_id", "") == new_line.canon_id:
             st.session_state.lines[i].qty += new_line.qty
             return
     st.session_state.lines.append(new_line)
@@ -154,8 +178,6 @@ SKU = {
 PROTEINS = ["Bacon", "Pork Sausage Links", HAM_NAME]
 GRIDDLE_CHOICES = ["Buttermilk Pancakes", "French Toast"]
 
-# You asked: no “Feeds X”. Keep the label relatable, but you previously wanted something like "Small Combo Box (6-10)".
-# If you want those ranges back, edit the keys below.
 COMBO_TIERS = {
     "Small Combo Box": {
         "eggs_oz": 40,
@@ -163,17 +185,15 @@ COMBO_TIERS = {
         "protein_pcs": 20,
         "pancakes_pcs": 20,
         "ft_slices": 10,
-        # packaging totals (clarity wording later)
         "aluminum_pans_eggs": 1,
         "aluminum_pans_red_pots": 1,
         "ihop_plastic_bases_protein": 1,
         "aluminum_pans_pancakes": 1,
         "aluminum_pans_ft": 2,
-        # condiments / serveware
         "butter_packets": 10,
         "syrup_packets": 10,
         "ketchup_packets": 10,
-        "powdered_sugar_cups_2oz": 1,  # 1 cup per 10 slices
+        "powdered_sugar_cups_2oz": 1,
         "serving_forks": 2,
         "serving_tongs": 2,
         "plates": 10,
@@ -262,7 +282,6 @@ for group_name, items in ALACARTE_GROUPS:
         ALACARTE_LABELS.append(label)
         AL_LABEL_TO_ID[label] = item_id
 
-
 # =========================================================
 # Totals building
 # =========================================================
@@ -305,7 +324,6 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
             add("serving_tongs", spec["serving_tongs"] * qty)
             add("plates", spec["plates"] * qty)
 
-            # Packaging totals (clear wording)
             add("aluminum_pans", (spec["aluminum_pans_eggs"] + spec["aluminum_pans_red_pots"]) * qty)
             add("ihop_plastic_bases", spec["ihop_plastic_bases_protein"] * qty)
             if griddle == "Buttermilk Pancakes":
@@ -368,9 +386,8 @@ def compute_order_totals(lines: List[OrderLine]) -> Dict[str, float]:
 
     return totals
 
-
 # =========================================================
-# Prep language formatting helpers (for output + PDF)
+# Prep language formatting helpers
 # =========================================================
 def eggs_prep_line(eggs_oz: float) -> str:
     # Inferred conversion: ~0.465 qt per lb
@@ -382,12 +399,6 @@ def eggs_prep_line(eggs_oz: float) -> str:
 
 
 def bag_overflow_line(total_oz: float, oz_per_bag: float, oz_per_portion: Optional[float], label: str) -> str:
-    """
-    Show:
-    - Always: total oz (portions / lbs)
-    - Only if > 1 bag: "Open: X bag(s) PLUS Y oz ..."
-    For under 1 bag, do NOT show bag text.
-    """
     lbs = ounces_to_lbs(total_oz)
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05) if lbs > 0 else 0
 
@@ -424,7 +435,7 @@ def red_pots_prep_line(total_oz: float) -> str:
     return bag_overflow_line(
         total_oz=total_oz,
         oz_per_bag=SKU["red_pots"]["lbs_per_bag"] * 16,
-        oz_per_portion=SKU["fries"]["oz_per_portion"],  # 6 oz portion logic
+        oz_per_portion=SKU["fries"]["oz_per_portion"],
         label=POTATOES_NAME
     )
 
@@ -451,13 +462,12 @@ def sausage_prep_line(sausage_pcs: float) -> str:
 
 
 def ham_prep_line(ham_pcs: float) -> str:
-    lbs = ounces_to_lbs(ham_pcs * 1.0)  # 1 oz per quarter slice
+    lbs = ounces_to_lbs(ham_pcs * 1.0)
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
     return f"{HAM_NAME}: {int(ham_pcs)} pcs (≈ {lbs_r:g} lb)"
 
 
 def chicken_strips_prep_line(pcs: float) -> str:
-    # placeholder: 3 oz each, but you said we can adjust later
     lbs = ounces_to_lbs(pcs * 3.0)
     lbs_r = friendly_round_up(lbs, inc=0.5, tiny_over=0.05)
     return f"Chicken Strips: {int(pcs)} pcs (≈ {lbs_r:g} lb)"
@@ -521,12 +531,8 @@ def build_prep_lines(totals: Dict[str, float]) -> List[str]:
 
     return lines
 
-
 # =========================================================
 # PDF Generation (day-of sheet)
-# - NO plating reference
-# - NO inventory impact
-# - NO CSV download
 # =========================================================
 def _pdf_draw_section_title(c: canvas.Canvas, title: str, x: float, y: float) -> float:
     c.setFont("Helvetica-Bold", 12)
@@ -549,7 +555,6 @@ def _pdf_draw_wrapped_lines(
     c.setFont(font_name, font_size)
     for raw in lines:
         prefix = "• " if bullet else ""
-        # wrap each paragraph (including possible embedded newlines)
         for para in str(raw).split("\n"):
             wrapped = simpleSplit(prefix + para, font_name, font_size, max_width)
             for w in wrapped:
@@ -559,7 +564,7 @@ def _pdf_draw_wrapped_lines(
                     c.setFont(font_name, font_size)
                 c.drawString(x, y, w)
                 y -= leading
-            prefix = "  " if bullet else ""  # subsequent wrapped lines align
+            prefix = "  " if bullet else ""
     return y
 
 
@@ -585,14 +590,12 @@ def generate_day_of_pdf(
 
     y = top
 
-    # Title
     c.setFont("Helvetica-Bold", 16)
     c.drawString(left, y, f"{APP_NAME} (Day-Of Sheet)")
     c.setFont("Helvetica", 9)
     c.drawRightString(width - right, y, f"{APP_VERSION}")
     y -= 18
 
-    # Header block
     c.setFont("Helvetica-Bold", 11)
     c.drawString(left, y, "Timing")
     y -= 12
@@ -602,7 +605,6 @@ def generate_day_of_pdf(
     c.drawString(left, y, f"Pickup Time: {pickup_dt.strftime('%Y-%m-%d %I:%M %p')}")
     y -= 14
 
-    # Headcount + utensils
     c.setFont("Helvetica-Bold", 11)
     c.drawString(left, y, "Counts")
     y -= 12
@@ -616,8 +618,6 @@ def generate_day_of_pdf(
     if recommended > 0:
         c.drawString(left, y, f"Utensil sets recommended: {recommended}")
         y -= 12
-
-        # mismatch note (simple)
         if utensils_ordered > 0 and utensils_ordered < headcount:
             c.setFont("Helvetica-Bold", 10)
             c.drawString(left, y, f"NOTE: Ordered {utensils_ordered} but headcount is {headcount}.")
@@ -628,19 +628,16 @@ def generate_day_of_pdf(
     c.line(left, y, width - right, y)
     y -= 16
 
-    # Section 1: Order Summary
     y = _pdf_draw_section_title(c, "1) Order Summary", left, y)
     summary_lines = [f"{ol.label}  (Qty {ol.qty})" for ol in order_lines]
     y = _pdf_draw_wrapped_lines(c, summary_lines, left, y, usable_w, bullet=True, bottom_margin=bottom)
     y -= 10
 
-    # Section 2: Food Prep Totals
     y = _pdf_draw_section_title(c, "2) Food Prep Totals", left, y)
     prep_lines = build_prep_lines(totals)
     y = _pdf_draw_wrapped_lines(c, prep_lines, left, y, usable_w, bullet=True, bottom_margin=bottom)
     y -= 10
 
-    # Section 3: Packaging Totals (clarified wording)
     y = _pdf_draw_section_title(c, "3) Packaging Totals", left, y)
     pack_lines = []
     if totals.get("aluminum_pans", 0) > 0:
@@ -652,7 +649,6 @@ def generate_day_of_pdf(
     y = _pdf_draw_wrapped_lines(c, pack_lines, left, y, usable_w, bullet=True, bottom_margin=bottom)
     y -= 10
 
-    # Section 4: Condiments
     y = _pdf_draw_section_title(c, "4) Condiments", left, y)
     cond = []
     if totals.get("butter_ct", 0) > 0:
@@ -668,7 +664,6 @@ def generate_day_of_pdf(
     y = _pdf_draw_wrapped_lines(c, cond, left, y, usable_w, bullet=True, bottom_margin=bottom)
     y -= 10
 
-    # Section 5: Serveware
     y = _pdf_draw_section_title(c, "5) Serveware", left, y)
     serve = []
     if totals.get("plates", 0) > 0:
@@ -677,7 +672,6 @@ def generate_day_of_pdf(
         serve.append(f"Serving tongs: {int(totals['serving_tongs'])}")
     if totals.get("serving_forks", 0) > 0:
         serve.append(f"Serving forks: {int(totals['serving_forks'])}")
-    # spoons aren't currently added by this build (kept for future)
     if utensils_ordered > 0:
         serve.append(f"Utensil sets (ordered): {int(utensils_ordered)}")
     if recommended > 0:
@@ -686,7 +680,6 @@ def generate_day_of_pdf(
         serve = ["None"]
     y = _pdf_draw_wrapped_lines(c, serve, left, y, usable_w, bullet=True, bottom_margin=bottom)
 
-    # Footer
     c.setFont("Helvetica-Oblique", 8)
     c.drawRightString(width - right, bottom - 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')} • {APP_VERSION}")
 
@@ -695,14 +688,13 @@ def generate_day_of_pdf(
     buffer.close()
     return pdf_bytes
 
-
 # =========================================================
 # UI
 # =========================================================
 init_state()
 
 st.title(f"{APP_NAME} {APP_VERSION}")
-st.caption("Dropdown entry for managers. Day-of output focuses on prep, packaging, condiments, serveware.")
+st.caption("Dropdown entry for managers. Sidebar merges identical items and uses icon buttons.")
 
 with st.container():
     st.subheader("Build Order")
@@ -731,7 +723,8 @@ with st.container():
     if st.button("Add Combo", type="primary", use_container_width=True):
         label = f"{combo_tier} | {combo_protein} | {combo_griddle}"
         key = LineKey(kind="combo", item_id=combo_tier, protein=combo_protein, griddle=combo_griddle)
-        merge_or_add_line(OrderLine(key=key, label=label, qty=int(combo_qty)))
+        canon_id = build_canon_id(key)
+        merge_or_add_line(OrderLine(key=key, label=label, qty=int(combo_qty), canon_id=canon_id))
         reset_combo_form()
         st.rerun()
 
@@ -755,7 +748,8 @@ with st.container():
             label = al_item
             key = LineKey(kind="alacarte", item_id=item_id)
 
-        merge_or_add_line(OrderLine(key=key, label=label, qty=int(al_qty)))
+        canon_id = build_canon_id(key)
+        merge_or_add_line(OrderLine(key=key, label=label, qty=int(al_qty), canon_id=canon_id))
         reset_alacarte_form()
         st.rerun()
 
@@ -772,11 +766,12 @@ with st.sidebar:
             with c1:
                 st.markdown(f"**{line.label}**")
                 st.caption(f"Qty: {line.qty}")
+
             with c2:
-                if st.button("Edit", key=f"edit_{idx}"):
+                if st.button("✏️", key=f"edit_{idx}", help="Edit item"):
                     st.session_state.edit_idx = idx
                     st.rerun()
-                if st.button("Remove", key=f"remove_{idx}"):
+                if st.button("🗑️", key=f"remove_{idx}", help="Remove item", type="secondary"):
                     remove_line(idx)
                     st.rerun()
 
@@ -806,6 +801,7 @@ with st.sidebar:
                     )
                     new_label = f"{new_tier} | {new_protein} | {new_griddle}"
                     new_key = LineKey(kind="combo", item_id=new_tier, protein=new_protein, griddle=new_griddle)
+
                 else:
                     current_base_label = line.label.split(" | ", 1)[0] if " | " in line.label else line.label
                     default_index = ALACARTE_LABELS.index(current_base_label) if current_base_label in ALACARTE_LABELS else 0
@@ -826,11 +822,14 @@ with st.sidebar:
                         new_label = new_label_base
                         new_key = LineKey(kind="alacarte", item_id=new_item_id)
 
+                new_canon_id = build_canon_id(new_key)
+
                 s1, s2 = edit.columns(2)
                 if s1.button("Save", key=f"save_{idx}", type="primary"):
+                    # Remove current line, then merge into existing position if identical exists
                     st.session_state.lines.pop(idx)
                     st.session_state.edit_idx = None
-                    merge_or_add_line(OrderLine(key=new_key, label=new_label, qty=int(new_qty)))
+                    merge_or_add_line(OrderLine(key=new_key, label=new_label, qty=int(new_qty), canon_id=new_canon_id))
                     st.rerun()
 
                 if s2.button("Cancel", key=f"cancel_{idx}"):
@@ -856,12 +855,10 @@ else:
     totals = compute_order_totals(st.session_state.lines)
     pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
 
-    # 1) Order Summary
     st.markdown("## 1) Order Summary")
     for ol in st.session_state.lines:
         st.write(f"• {ol.label} (Qty {ol.qty})")
 
-    # Counts + utensil note (simple)
     st.markdown("### Counts")
     st.write(f"• Headcount: {int(headcount)}")
     st.write(f"• Utensil sets ordered: {int(ordered_utensils)}")
@@ -872,11 +869,9 @@ else:
 
     st.divider()
 
-    # 2) Food Prep Totals
     st.markdown("## 2) Food Prep Totals")
     prep_lines = build_prep_lines(totals)
     for line in prep_lines:
-        # preserve any embedded newlines
         if "\n" in line:
             first, rest = line.split("\n", 1)
             st.write("• " + first)
@@ -887,7 +882,6 @@ else:
 
     st.divider()
 
-    # 3) Packaging Totals (clarified)
     st.markdown("## 3) Packaging Totals")
     pack_rows = []
     if totals.get("aluminum_pans", 0) > 0:
@@ -899,7 +893,6 @@ else:
     else:
         st.caption("No packaging totals calculated for this order.")
 
-    # 4) Condiments
     st.markdown("## 4) Condiments")
     cond_rows = []
     if totals.get("butter_ct", 0) > 0:
@@ -915,7 +908,6 @@ else:
     else:
         st.caption("No condiment totals calculated for this order.")
 
-    # 5) Serveware
     st.markdown("## 5) Serveware")
     serve_rows = []
     if totals.get("plates", 0) > 0:
@@ -935,7 +927,6 @@ else:
 
     st.divider()
 
-    # PDF Download (replaces CSV)
     st.subheader("Print / PDF")
     pdf_bytes = generate_day_of_pdf(
         order_lines=st.session_state.lines,
