@@ -16,7 +16,7 @@ from reportlab.lib.utils import simpleSplit
 # App Meta
 # =========================================================
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v3.0.2"
+APP_VERSION = "v3.0.3"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -117,7 +117,6 @@ COMBO_TIERS = {
         "serving_forks": 2,
         "serving_tongs": 2,
         "serving_spoons": 0,
-        "paper_plates": 10,
     },
     "Medium Combo Box": {
         "eggs_oz": 80,
@@ -137,7 +136,6 @@ COMBO_TIERS = {
         "serving_forks": 2,
         "serving_tongs": 2,
         "serving_spoons": 0,
-        "paper_plates": 20,
     },
     "Large Combo Box": {
         "eggs_oz": 160,
@@ -157,7 +155,6 @@ COMBO_TIERS = {
         "serving_forks": 8,
         "serving_tongs": 5,
         "serving_spoons": 0,
-        "paper_plates": 40,
     },
 }
 
@@ -256,7 +253,11 @@ def init_state():
     st.session_state.setdefault("pickup_date", datetime.now().date())
     st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
     st.session_state.setdefault("headcount", 0)
-    st.session_state.setdefault("utensils_ordered", 0)
+
+    # SOP guest request toggles (default ON)
+    st.session_state.setdefault("req_plates", True)
+    st.session_state.setdefault("req_utensils", True)
+    st.session_state.setdefault("req_napkins", True)
 
 
 def merge_or_add_line(new_line: OrderLine):
@@ -342,12 +343,11 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
             C("Syrup Packets", spec["syrup_packets"] * qty)
             C("Ketchup Packets", spec["ketchup_packets"] * qty)
 
+            # Service utensils (serving tools) are always needed
             S("Serving Tongs", spec["serving_tongs"] * qty)
             S("Serving Forks", spec["serving_forks"] * qty)
             if spec.get("serving_spoons", 0) > 0:
                 S("Serving Spoons", spec["serving_spoons"] * qty)
-
-            G("Paper Plates", spec["paper_plates"] * qty)
 
         # Main items (sandwiches, strips, beverages)
         elif line.key.kind == "main":
@@ -368,8 +368,7 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                 P("Aluminum ½ Pans", 2 * qty)     # sandwiches + toppings
                 P("Soup Cups (8 oz)", 3 * qty)    # IHOP + BBQ + pickles
 
-                G("Paper Plates", 10 * qty)
-
+                # Serving tools are always needed
                 S("Serving Tongs", 2 * qty)
                 S("Serving Spoons", 2 * qty)
 
@@ -381,7 +380,7 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                 F("Chicken Strips (pcs)", 40 * qty)
                 P("Aluminum ½ Pans", 1 * qty)
                 P("Soup Cups (8 oz)", 3 * qty)    # BBQ + IHOP + Ranch
-                G("Paper Plates", 10 * qty)
+
                 S("Serving Tongs", 1 * qty)
                 S("Serving Spoons", 3 * qty)
 
@@ -389,19 +388,12 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
                 bev = line.key.beverage_type or "Cold Beverage"
                 F(f"Cold Beverage (128 oz) - {bev}", 1 * qty)
                 P("Beverage Pouches", 1 * qty)
-                G("Cold Cups", 10 * qty)
-                G("Cold Lids", 10 * qty)
-                G("Straws", 10 * qty)
+                # Cups/lids/straws are guest-request items; handled by headcount toggles
 
             elif item == "coffee_box":
                 F("Coffee Box (96 oz)", 1 * qty)
                 P("Hot Beverage Containers", 1 * qty)
-                G("Hot Cups", 10 * qty)
-                G("Hot Lids", 10 * qty)
-                G("Sleeves", 10 * qty)
-                G("Stirrers", 10 * qty)
-                C("Sugar Packets", 10 * qty)
-                C("Creamers", 10 * qty)
+                # Cups/lids/sleeves/stirrers/sugar/creamer can be treated as guest-request items; handled by toggles
 
         # À la carte
         elif line.key.kind == "alacarte":
@@ -410,7 +402,6 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
             if "pancakes_pcs" in spec:
                 F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
                 P("Aluminum ½ Pans", 2 * qty)
-                G("Paper Plates", 20 * qty)
                 C("Butter Packets", 20 * qty)
                 C("Syrup Packets", 20 * qty)
                 S("Serving Tongs", 2 * qty)
@@ -418,7 +409,6 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
             if "ft_slices" in spec:
                 F("French Toast (slices)", spec["ft_slices"] * qty)
                 P("Aluminum ½ Pans", 2 * qty)
-                G("Paper Plates", 10 * qty)
                 C("Butter Packets", 10 * qty)
                 C("Syrup Packets", 10 * qty)
                 C("Powdered Sugar Cups (2 oz)", 1 * qty)
@@ -447,18 +437,59 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
             if "fries_oz" in spec:
                 F("French Fries (oz)", spec["fries_oz"] * qty)
                 P("Aluminum ½ Pans", 1 * qty)
-                G("Paper Plates", 10 * qty)
                 S("Serving Tongs", 1 * qty)
                 C("Ketchup Packets", 10 * qty)
 
             if "onion_rings_rings" in spec:
                 F("Onion Rings (rings)", spec["onion_rings_rings"] * qty)
                 P("Aluminum ½ Pans", 2 * qty)
-                G("Paper Plates", 10 * qty)
                 S("Serving Tongs", 1 * qty)
                 C("Ketchup Packets", 10 * qty)
 
     return food, packaging, guestware, service, cond
+
+
+def apply_headcount_guestware(
+    guestware: Dict[str, float],
+    cond: Dict[str, float],
+    headcount: int,
+    req_plates: bool,
+    req_utensils: bool,
+    req_napkins: bool,
+    has_cold_bev: bool,
+    has_hot_bev: bool,
+):
+    """
+    SOP guest-request logic:
+    - If requested, calculate based on headcount.
+    - If not requested, do not include.
+    """
+    hc = int(headcount or 0)
+    if hc <= 0:
+        return
+
+    if req_plates:
+        _add(guestware, "Paper Plates", hc)
+
+    if req_utensils:
+        _add(guestware, "Utensil Sets", hc)
+
+    if req_napkins:
+        _add(guestware, "Napkins", hc)
+
+    # Beverages: only include cups/lids/straws if utensils are requested (or you can separate later)
+    if req_utensils:
+        if has_cold_bev:
+            _add(guestware, "Cold Cups", hc)
+            _add(guestware, "Cold Lids", hc)
+            _add(guestware, "Straws", hc)
+        if has_hot_bev:
+            _add(guestware, "Hot Cups", hc)
+            _add(guestware, "Hot Lids", hc)
+            _add(guestware, "Sleeves", hc)
+            _add(guestware, "Stirrers", hc)
+            _add(cond, "Sugar Packets", hc)
+            _add(cond, "Creamers", hc)
 
 
 # =========================================================
@@ -569,7 +600,9 @@ def generate_day_of_pdf(
     pickup_dt: datetime,
     ready_dt: datetime,
     headcount: int,
-    utensils_ordered: int,
+    req_plates: bool,
+    req_utensils: bool,
+    req_napkins: bool,
     food: Dict[str, float],
     packaging: Dict[str, float],
     guestware: Dict[str, float],
@@ -611,11 +644,12 @@ def generate_day_of_pdf(
     c.setFont("Helvetica", 10)
     c.drawString(left, y, f"Headcount: {int(headcount)}")
     y -= 12
-    c.drawString(left, y, f"Utensil sets ordered: {int(utensils_ordered)}")
+    c.drawString(left, y, f"Guest requested plates: {'Yes' if req_plates else 'No'}")
     y -= 12
-    if headcount and headcount > 0:
-        c.drawString(left, y, f"Utensil sets recommended: {int(headcount)}")
-        y -= 12
+    c.drawString(left, y, f"Guest requested utensils: {'Yes' if req_utensils else 'No'}")
+    y -= 12
+    c.drawString(left, y, f"Guest requested napkins: {'Yes' if req_napkins else 'No'}")
+    y -= 12
 
     y -= 6
     c.line(left, y, width - right, y)
@@ -642,7 +676,7 @@ def generate_day_of_pdf(
 
     y = _pdf_draw_section_title(c, "4) Plates & Cups", left, y)
     g_lines = []
-    for k in ["Paper Plates", "Cold Cups", "Cold Lids", "Hot Cups", "Hot Lids", "Sleeves", "Straws", "Stirrers"]:
+    for k in ["Paper Plates", "Utensil Sets", "Napkins", "Cold Cups", "Cold Lids", "Hot Cups", "Hot Lids", "Sleeves", "Straws", "Stirrers"]:
         v = guestware.get(k, 0)
         if v:
             g_lines.append(f"{k}: {int(v)}")
@@ -708,14 +742,11 @@ with top1:
 with top2:
     st.subheader("Headcount")
     st.number_input("Headcount (if provided)", min_value=0, value=int(st.session_state.headcount), step=1, key="headcount")
-    st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=int(st.session_state.utensils_ordered), step=1, key="utensils_ordered")
 
-    headcount = int(st.session_state.headcount)
-    utensils_ordered = int(st.session_state.utensils_ordered)
-    if headcount > 0:
-        st.caption(f"Utensil sets recommended: {headcount}")
-        if utensils_ordered > 0 and utensils_ordered < headcount:
-            st.error(f"Utensil mismatch: ordered {utensils_ordered} but headcount is {headcount}.")
+    st.markdown("**Guest Requested**")
+    st.toggle("Plates", key="req_plates")
+    st.toggle("Utensils", key="req_utensils")
+    st.toggle("Napkins", key="req_napkins")
 
 st.divider()
 
@@ -724,7 +755,6 @@ st.divider()
 # =========================================================
 st.subheader("Build Order")
 
-# Breakfast combos
 st.markdown("### Breakfast Combo Boxes")
 b1, b2, b3, b4 = st.columns([3, 3, 3, 2])
 with b1:
@@ -751,7 +781,6 @@ if st.button("Add Combo", type="primary", use_container_width=True):
 
 st.divider()
 
-# Sandwiches / Strips / Beverages
 st.markdown("### Sandwiches, Strips, Beverages")
 m1, m2, m3 = st.columns([6, 2, 4])
 
@@ -766,7 +795,6 @@ with m3:
     else:
         st.caption("")
 
-# Make Add Item match Add Combo appearance
 if st.button("Add Item", type="primary", use_container_width=True):
     item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
     qty = int(st.session_state.main_qty)
@@ -786,7 +814,6 @@ if st.button("Add Item", type="primary", use_container_width=True):
 
 st.divider()
 
-# Additional options (edge-case framing)
 with st.container(border=True):
     st.markdown("### Additional Options")
     st.caption("Rare use. Only open this section if the order includes extra items.")
@@ -828,7 +855,6 @@ with st.sidebar:
                 st.caption(f"Qty: {line.qty}")
 
             with c2:
-                # stacked buttons
                 if st.button("✏️", key=f"edit_{idx}", help="Edit item"):
                     st.session_state.edit_idx = idx
                     st.rerun()
@@ -935,6 +961,21 @@ if not st.session_state.lines:
 else:
     food, packaging, guestware, service, cond = compute_buckets(st.session_state.lines)
 
+    # Determine if beverages exist (for cups/lids logic)
+    has_cold_bev = any(l.key.kind == "main" and l.key.item_id == "cold_beverage" for l in st.session_state.lines)
+    has_hot_bev = any(l.key.kind == "main" and l.key.item_id == "coffee_box" for l in st.session_state.lines)
+
+    apply_headcount_guestware(
+        guestware=guestware,
+        cond=cond,
+        headcount=int(st.session_state.headcount),
+        req_plates=bool(st.session_state.req_plates),
+        req_utensils=bool(st.session_state.req_utensils),
+        req_napkins=bool(st.session_state.req_napkins),
+        has_cold_bev=has_cold_bev,
+        has_hot_bev=has_hot_bev,
+    )
+
     st.markdown("## Food Prep Totals")
     prep_lines = build_food_prep_lines(food)
     for line in prep_lines or ["None"]:
@@ -955,7 +996,7 @@ else:
 
     st.markdown("## Plates & Cups")
     guest_rows = []
-    for k in ["Paper Plates", "Cold Cups", "Cold Lids", "Hot Cups", "Hot Lids", "Sleeves", "Straws", "Stirrers"]:
+    for k in ["Paper Plates", "Utensil Sets", "Napkins", "Cold Cups", "Cold Lids", "Hot Cups", "Hot Lids", "Sleeves", "Straws", "Stirrers"]:
         v = guestware.get(k, 0)
         if v:
             guest_rows.append({"Item": k, "Total": int(v)})
@@ -1005,7 +1046,9 @@ else:
         pickup_dt=pickup_dt,
         ready_dt=ready_dt,
         headcount=int(st.session_state.headcount),
-        utensils_ordered=int(st.session_state.utensils_ordered),
+        req_plates=bool(st.session_state.req_plates),
+        req_utensils=bool(st.session_state.req_utensils),
+        req_napkins=bool(st.session_state.req_napkins),
         food=food,
         packaging=packaging,
         guestware=guestware,
