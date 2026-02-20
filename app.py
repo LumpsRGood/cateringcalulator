@@ -16,7 +16,7 @@ from reportlab.lib.utils import simpleSplit
 # App Meta
 # =========================================================
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v3.0.1"
+APP_VERSION = "v3.0.2"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -201,7 +201,6 @@ ALACARTE_GROUPS = [
 ALACARTE_LOOKUP: Dict[str, Dict] = {}
 ALACARTE_LABELS: List[str] = []
 AL_LABEL_TO_ID: Dict[str, str] = {}
-
 for group_name, items in ALACARTE_GROUPS:
     for item_id, label, payload in items:
         ALACARTE_LOOKUP[item_id] = {"label": label, "payload": payload, "group": group_name}
@@ -222,7 +221,7 @@ def init_state():
     st.session_state.setdefault("_reset_main", False)
     st.session_state.setdefault("_reset_alacarte", False)
 
-    # Sidebar form defaults
+    # Main-page Build Order defaults
     if st.session_state._reset_combo:
         st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
         st.session_state.combo_protein = PROTEINS[0]
@@ -253,7 +252,7 @@ def init_state():
         st.session_state.setdefault("al_item", ALACARTE_LABELS[0])
         st.session_state.setdefault("al_qty", 1)
 
-    # Main-page timing/counts defaults
+    # Timing / counts defaults
     st.session_state.setdefault("pickup_date", datetime.now().date())
     st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
     st.session_state.setdefault("headcount", 0)
@@ -466,6 +465,7 @@ def compute_buckets(lines: List[OrderLine]) -> Tuple[Dict[str, float], Dict[str,
 # Prep formatting helpers (Food Prep Totals)
 # =========================================================
 def eggs_prep_line_from_oz(eggs_oz: float) -> str:
+    # Inferred conversion earlier: ~0.465 qt per lb
     lbs = ounces_to_lbs(eggs_oz)
     quarts = lbs * 0.465
     quarts_r = friendly_round_up(quarts, inc=0.5, tiny_over=0.05)
@@ -519,6 +519,7 @@ def build_food_prep_lines(food: Dict[str, float]) -> List[str]:
     for k, v in food.items():
         if k.startswith("Cold Beverage (128 oz)"):
             lines.append(f"{k}: {int(v)}")
+
     coffee_boxes = food.get("Coffee Box (96 oz)", 0)
     if coffee_boxes:
         lines.append(f"Coffee Box (96 oz): {int(coffee_boxes)}")
@@ -659,8 +660,16 @@ def generate_day_of_pdf(
 
     y = _pdf_draw_section_title(c, "6) Condiment Bag", left, y)
     c_lines = []
-    for k in ["Butter Packets", "Syrup Packets", "Ketchup Packets", "Mustard Packets", "Mayo Packets",
-              "Sugar Packets", "Creamers", "Powdered Sugar Cups (2 oz)"]:
+    for k in [
+        "Butter Packets",
+        "Syrup Packets",
+        "Ketchup Packets",
+        "Mustard Packets",
+        "Mayo Packets",
+        "Sugar Packets",
+        "Creamers",
+        "Powdered Sugar Cups (2 oz)",
+    ]:
         v = cond.get(k, 0)
         if v:
             c_lines.append(f"{k}: {int(v)}")
@@ -684,65 +693,110 @@ st.title(f"{APP_NAME} {APP_VERSION}")
 st.caption("Operational mode. Additive math. No SKUs. Toppings and beverage packaging are automatic.")
 
 # =========================================================
-# SIDEBAR: Build Order + Current Order (Order Summary)
+# MAIN PAGE TOP: Timing (col1) + Headcount (col2)
 # =========================================================
-with st.sidebar:
-    st.subheader("Build Order")
+top1, top2 = st.columns(2)
 
-    # Combos
-    st.markdown("**Breakfast Combo Boxes**")
+with top1:
+    st.subheader("Timing")
+    st.date_input("Pickup date", key="pickup_date")
+    st.time_input("Pickup time", key="pickup_time")
+    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
+    st.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
+    st.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
+
+with top2:
+    st.subheader("Headcount")
+    st.number_input("Headcount (if provided)", min_value=0, value=int(st.session_state.headcount), step=1, key="headcount")
+    st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=int(st.session_state.utensils_ordered), step=1, key="utensils_ordered")
+
+    headcount = int(st.session_state.headcount)
+    utensils_ordered = int(st.session_state.utensils_ordered)
+    if headcount > 0:
+        st.caption(f"Utensil sets recommended: {headcount}")
+        if utensils_ordered > 0 and utensils_ordered < headcount:
+            st.error(f"Utensil mismatch: ordered {utensils_ordered} but headcount is {headcount}.")
+
+st.divider()
+
+# =========================================================
+# MAIN PAGE: Build Order
+# =========================================================
+st.subheader("Build Order")
+
+# Breakfast combos
+st.markdown("### Breakfast Combo Boxes")
+b1, b2, b3, b4 = st.columns([3, 3, 3, 2])
+with b1:
     st.selectbox("Combo size", list(COMBO_TIERS.keys()), key="combo_tier")
+with b2:
     st.selectbox("Protein", PROTEINS, key="combo_protein")
+with b3:
     st.selectbox("Griddle item", GRIDDLE_CHOICES, key="combo_griddle")
-    st.number_input("Combo quantity", min_value=1, value=int(st.session_state.combo_qty), step=1, key="combo_qty")
+with b4:
+    st.number_input("Qty", min_value=1, value=int(st.session_state.combo_qty), step=1, key="combo_qty")
 
-    if st.button("Add Combo", type="primary", use_container_width=True):
-        tier = st.session_state.combo_tier
-        protein = st.session_state.combo_protein
-        griddle = st.session_state.combo_griddle
-        qty = int(st.session_state.combo_qty)
-        label = f"{tier} | {protein} | {griddle}"
-        key = LineKey(kind="combo", item_id=tier, protein=protein, griddle=griddle)
-        canon_id = build_canon_id(key)
-        merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
-        reset_combo_form()
-        st.rerun()
+if st.button("Add Combo", type="primary", use_container_width=True):
+    tier = st.session_state.combo_tier
+    protein = st.session_state.combo_protein
+    griddle = st.session_state.combo_griddle
+    qty = int(st.session_state.combo_qty)
 
-    st.divider()
+    label = f"{tier} | {protein} | {griddle}"
+    key = LineKey(kind="combo", item_id=tier, protein=protein, griddle=griddle)
+    canon_id = build_canon_id(key)
+    merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
+    reset_combo_form()
+    st.rerun()
 
-    # Main items
-    st.markdown("**Sandwiches, Strips, Beverages**")
+st.divider()
+
+# Sandwiches / Strips / Beverages
+st.markdown("### Sandwiches, Strips, Beverages")
+m1, m2, m3 = st.columns([6, 2, 4])
+
+with m1:
     st.selectbox("Select item", MAIN_LABELS, key="main_item")
-    st.number_input("Quantity", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty")
-
+with m2:
+    st.number_input("Qty", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty")
+with m3:
     main_item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
     if main_item_id == "cold_beverage":
         st.selectbox("Cold beverage type", COLD_BEV_TYPES, key="cold_bev_type_main")
+    else:
+        st.caption("")
 
-    # Make this button match Add Combo
-    if st.button("Add Item", type="primary", use_container_width=True):
-        item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
-        qty = int(st.session_state.main_qty)
+# Make Add Item match Add Combo appearance
+if st.button("Add Item", type="primary", use_container_width=True):
+    item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
+    qty = int(st.session_state.main_qty)
 
-        if item_id == "cold_beverage":
-            bev_type = st.session_state.get("cold_bev_type_main", COLD_BEV_TYPES[0])
-            label = f"{st.session_state.main_item} | {bev_type}"
-            key = LineKey(kind="main", item_id=item_id, beverage_type=bev_type)
-        else:
-            label = st.session_state.main_item
-            key = LineKey(kind="main", item_id=item_id)
+    if item_id == "cold_beverage":
+        bev_type = st.session_state.get("cold_bev_type_main", COLD_BEV_TYPES[0])
+        label = f"{st.session_state.main_item} | {bev_type}"
+        key = LineKey(kind="main", item_id=item_id, beverage_type=bev_type)
+    else:
+        label = st.session_state.main_item
+        key = LineKey(kind="main", item_id=item_id)
 
-        canon_id = build_canon_id(key)
-        merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
-        reset_main_form()
-        st.rerun()
+    canon_id = build_canon_id(key)
+    merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
+    reset_main_form()
+    st.rerun()
 
-    # Yellow callout (no CSS hacks)
-    st.warning("➕ Optional: Add À La Carte Items if needed", icon="⚠️")
+st.divider()
 
-    with st.expander("➕ Need to add À La Carte Items? (Optional)", expanded=False):
-        st.selectbox("À la carte item", ALACARTE_LABELS, key="al_item")
-        st.number_input("À la carte quantity", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
+# Additional options (edge-case framing)
+with st.container(border=True):
+    st.markdown("### Additional Options")
+    st.caption("Rare use. Only open this section if the order includes extra items.")
+
+    with st.expander("➕ À La Carte Items (Optional)  Click to open", expanded=False):
+        a1, a2 = st.columns([6, 2])
+        with a1:
+            st.selectbox("À la carte item", ALACARTE_LABELS, key="al_item")
+        with a2:
+            st.number_input("Qty", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
 
         if st.button("Add À La Carte", use_container_width=True):
             item_id = AL_LABEL_TO_ID[st.session_state.al_item]
@@ -754,12 +808,16 @@ with st.sidebar:
             reset_alacarte_form()
             st.rerun()
 
-    st.divider()
+st.divider()
 
+# =========================================================
+# SIDEBAR: Current Order ONLY
+# =========================================================
+with st.sidebar:
     st.subheader("Current Order")
 
     if not st.session_state.lines:
-        st.info("Add items to build an order.")
+        st.info("No items yet. Build the order on the main screen.")
     else:
         for idx, line in enumerate(st.session_state.lines):
             box = st.container(border=True)
@@ -770,7 +828,7 @@ with st.sidebar:
                 st.caption(f"Qty: {line.qty}")
 
             with c2:
-                # stacked buttons (one per line in the sidebar)
+                # stacked buttons
                 if st.button("✏️", key=f"edit_{idx}", help="Edit item"):
                     st.session_state.edit_idx = idx
                     st.rerun()
@@ -778,7 +836,6 @@ with st.sidebar:
                     remove_line(idx)
                     st.rerun()
 
-            # Edit panel
             if st.session_state.edit_idx == idx:
                 edit = st.container(border=True)
                 edit.markdown("**Edit Line**")
@@ -868,41 +925,13 @@ with st.sidebar:
             st.session_state.edit_idx = None
             st.rerun()
 
-
-# =========================================================
-# MAIN PAGE: Timing (col1) + Headcount (col2)
-# =========================================================
-c1, c2 = st.columns(2)
-
-with c1:
-    st.subheader("Timing")
-    st.date_input("Pickup date", key="pickup_date")
-    st.time_input("Pickup time", key="pickup_time")
-    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
-    st.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
-    st.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
-
-with c2:
-    st.subheader("Headcount")
-    st.number_input("Headcount (if provided)", min_value=0, value=int(st.session_state.headcount), step=1, key="headcount")
-    st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=int(st.session_state.utensils_ordered), step=1, key="utensils_ordered")
-
-    headcount = int(st.session_state.headcount)
-    utensils_ordered = int(st.session_state.utensils_ordered)
-    if headcount > 0:
-        st.caption(f"Utensil sets recommended: {headcount}")
-        if utensils_ordered > 0 and utensils_ordered < headcount:
-            st.error(f"Utensil mismatch: ordered {utensils_ordered} but headcount is {headcount}.")
-
-st.divider()
-
 # =========================================================
 # OUTPUT + PDF
 # =========================================================
 st.subheader("Day-Of Output")
 
 if not st.session_state.lines:
-    st.caption("Build an order in the left sidebar to generate the day-of sheet.")
+    st.caption("Build an order above to generate the day-of sheet.")
 else:
     food, packaging, guestware, service, cond = compute_buckets(st.session_state.lines)
 
@@ -937,8 +966,16 @@ else:
 
     st.markdown("## Condiment Bag")
     cond_rows = []
-    for k in ["Butter Packets", "Syrup Packets", "Ketchup Packets", "Mustard Packets", "Mayo Packets",
-              "Sugar Packets", "Creamers", "Powdered Sugar Cups (2 oz)"]:
+    for k in [
+        "Butter Packets",
+        "Syrup Packets",
+        "Ketchup Packets",
+        "Mustard Packets",
+        "Mayo Packets",
+        "Sugar Packets",
+        "Creamers",
+        "Powdered Sugar Cups (2 oz)",
+    ]:
         v = cond.get(k, 0)
         if v:
             cond_rows.append({"Condiment": k, "Total": int(v)})
