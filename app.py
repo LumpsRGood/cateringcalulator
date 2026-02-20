@@ -574,4 +574,391 @@ def inventory_impact(totals: Dict[str, float]) -> List[Dict[str, str]]:
     if rings > 0:
         rings_per_bag = int((SKU["onion_rings"]["lbs_per_bag"] * 16) / SKU["onion_rings"]["oz_per_ring"])
         full_bags = int(rings // rings_per_bag)
-        rem = int(rings - full_b
+        rem = int(rings - full_bags * rings_per_bag)
+        if full_bags == 0:
+            add_row("Onion Rings", SKU["onion_rings"]["sku"], f"{int(rings)} rings total")
+        else:
+            add_row("Onion Rings", SKU["onion_rings"]["sku"], f"Open {full_bags} bag(s) + {rem} rings")
+
+    burg = totals.get("steakburgers_pcs", 0)
+    if burg > 0:
+        case_fraction = burg / SKU["steakburgers"]["patties_per_case"]
+        add_row("Steakburger Patties", SKU["steakburgers"]["sku"], f"{int(burg)} patties (≈ {case_fraction:.2f} case)")
+
+    buns = totals.get("buns_ct", 0)
+    if buns > 0:
+        case_fraction = buns / SKU["burger_buns"]["buns_per_case"]
+        add_row("Burger Buns", SKU["burger_buns"]["sku"], f"{int(buns)} buns (≈ {case_fraction:.2f} case)")
+
+    if totals.get("mayo_ct", 0) > 0:
+        add_row("Mayo Packets", SKU["mayo_packets"]["sku"], f"{int(totals['mayo_ct'])} packets")
+    if totals.get("ketchup_ct", 0) > 0:
+        add_row("Ketchup Packets", SKU["ketchup_packets"]["sku"], f"{int(totals['ketchup_ct'])} packets")
+    if totals.get("mustard_ct", 0) > 0:
+        add_row("Mustard Packets", SKU["mustard_packets"]["sku"], f"{int(totals['mustard_ct'])} packets")
+    if totals.get("syrup_ct", 0) > 0:
+        add_row("Syrup Packets", SKU["syrup_packets"]["sku"], f"{int(totals['syrup_ct'])} packets")
+    if totals.get("butter_ct", 0) > 0:
+        add_row("Butter Packets", SKU["butter_packets"]["sku"], f"{int(totals['butter_ct'])} packets")
+
+    if totals.get("coffee_packs", 0) > 0:
+        packs = int(totals["coffee_packs"])
+        case_fraction = packs / SKU["coffee_pack"]["packs_per_case"]
+        add_row("Coffee Packs", SKU["coffee_pack"]["sku"], f"{packs} packs (≈ {case_fraction:.2f} case)")
+
+    for k, v in totals.items():
+        if not k.startswith("cold_bags::"):
+            continue
+        bev_type = k.split("::", 1)[1]
+        bags = int(v)
+        oz_needed = bags * COLD_BEV_OZ
+        if bev_type == "Orange Juice":
+            bottles = math.ceil(oz_needed / SKU["oj"]["oz_per_bottle"] - 1e-9)
+            add_row("Orange Juice for Cold Bags", SKU["oj"]["sku"], f"{bags} bag(s) → {bottles} bottle(s)")
+        elif bev_type == "Apple Juice":
+            bottles = math.ceil(oz_needed / SKU["aj"]["oz_per_bottle"] - 1e-9)
+            add_row("Apple Juice for Cold Bags", SKU["aj"]["sku"], f"{bags} bag(s) → {bottles} bottle(s)")
+
+    return rows
+
+
+# =========================================================
+# UI
+# =========================================================
+init_state()
+
+st.title(f"{APP_NAME} {APP_VERSION}")
+st.caption("Manager-friendly dropdown entry. Prep totals + plating reference + inventory impact.")
+
+main, _ = st.columns([1, 1])
+
+with main:
+    st.subheader("Build Order")
+
+    st.markdown("### Timing")
+    pickup_date = st.date_input("Pickup date", key="pickup_date")
+    pickup_time = st.time_input("Pickup time", key="pickup_time")
+
+    pickup_dt, ready_dt = compute_pickup_and_ready(pickup_date, pickup_time)
+    t1, t2 = st.columns(2)
+    t1.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
+    t2.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
+
+    st.divider()
+
+    headcount = st.number_input("Headcount (if provided)", min_value=0, value=0, step=1)
+    ordered_utensils = st.number_input("Utensil sets ordered (trust this number)", min_value=0, value=0, step=1)
+
+    st.divider()
+    st.markdown("### — Breakfast Combo Boxes —")
+    combo_tier = st.selectbox("Combo size", list(COMBO_TIERS.keys()), key="combo_tier")
+    combo_protein = st.selectbox("Protein", PROTEINS, key="combo_protein")
+    combo_griddle = st.selectbox("Griddle item", GRIDDLE_CHOICES, key="combo_griddle")
+    combo_qty = st.number_input("Combo quantity", min_value=1, value=int(st.session_state.combo_qty), step=1, key="combo_qty")
+
+    if st.button("Add Combo", type="primary", use_container_width=True):
+        label = f"{combo_tier} | {combo_protein} | {combo_griddle}"
+        key = LineKey(kind="combo", item_id=combo_tier, protein=combo_protein, griddle=combo_griddle)
+        merge_or_add_line(OrderLine(key=key, label=label, qty=int(combo_qty)))
+        reset_combo_form()
+        st.rerun()
+
+    st.divider()
+    st.markdown("### — À La Carte Items —")
+    al_item = st.selectbox("Select item", ALACARTE_LABELS, key="al_item")
+    al_qty = st.number_input("À la carte quantity", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
+
+    al_id = AL_LABEL_TO_ID[al_item]
+    bev_type = None
+    if al_id == "cold_bag":
+        bev_type = st.selectbox("Cold beverage type", COLD_BEV_TYPES, index=0, key="cold_bev_type")
+
+    if st.button("Add À La Carte", use_container_width=True):
+        item_id = AL_LABEL_TO_ID[al_item]
+        if item_id == "cold_bag":
+            label = f"{al_item} | {bev_type}"
+            key = LineKey(kind="alacarte", item_id=item_id, beverage_type=bev_type)
+        else:
+            label = al_item
+            key = LineKey(kind="alacarte", item_id=item_id)
+
+        merge_or_add_line(OrderLine(key=key, label=label, qty=int(al_qty)))
+        reset_alacarte_form()
+        st.rerun()
+
+with st.sidebar:
+    st.subheader("Current Order")
+
+    if not st.session_state.lines:
+        st.info("Add items to build an order.")
+    else:
+        for idx, line in enumerate(st.session_state.lines):
+            box = st.container(border=True)
+            c1, c2 = box.columns([5, 2])
+
+            with c1:
+                st.markdown(f"**{line.label}**")
+                st.caption(f"Qty: {line.qty}")
+            with c2:
+                if st.button("Edit", key=f"edit_{idx}"):
+                    st.session_state.edit_idx = idx
+                    st.rerun()
+                if st.button("Remove", key=f"remove_{idx}"):
+                    remove_line(idx)
+                    st.rerun()
+
+            if st.session_state.edit_idx == idx:
+                edit = st.container(border=True)
+                edit.markdown("**Edit Line**")
+                new_qty = edit.number_input("Quantity", min_value=1, value=int(line.qty), step=1, key=f"edit_qty_{idx}")
+
+                if line.key.kind == "combo":
+                    new_tier = edit.selectbox(
+                        "Combo size",
+                        list(COMBO_TIERS.keys()),
+                        index=list(COMBO_TIERS.keys()).index(line.key.item_id),
+                        key=f"edit_tier_{idx}",
+                    )
+                    new_protein = edit.selectbox(
+                        "Protein",
+                        PROTEINS,
+                        index=PROTEINS.index(line.key.protein),
+                        key=f"edit_protein_{idx}",
+                    )
+                    new_griddle = edit.selectbox(
+                        "Griddle item",
+                        GRIDDLE_CHOICES,
+                        index=GRIDDLE_CHOICES.index(line.key.griddle),
+                        key=f"edit_griddle_{idx}",
+                    )
+                    new_label = f"{new_tier} | {new_protein} | {new_griddle}"
+                    new_key = LineKey(kind="combo", item_id=new_tier, protein=new_protein, griddle=new_griddle)
+
+                else:
+                    current_base_label = line.label.split(" | ", 1)[0] if " | " in line.label else line.label
+                    al_labels = ALACARTE_LABELS
+                    default_index = al_labels.index(current_base_label) if current_base_label in al_labels else 0
+
+                    new_label_base = edit.selectbox("Item", al_labels, index=default_index, key=f"edit_al_{idx}")
+                    new_item_id = AL_LABEL_TO_ID[new_label_base]
+
+                    new_bev = None
+                    if new_item_id == "cold_bag":
+                        existing_bev = line.key.beverage_type or COLD_BEV_TYPES[0]
+                        new_bev = edit.selectbox(
+                            "Cold beverage type",
+                            COLD_BEV_TYPES,
+                            index=COLD_BEV_TYPES.index(existing_bev),
+                            key=f"edit_bev_{idx}",
+                        )
+                        new_label = f"{new_label_base} | {new_bev}"
+                        new_key = LineKey(kind="alacarte", item_id=new_item_id, beverage_type=new_bev)
+                    else:
+                        new_label = new_label_base
+                        new_key = LineKey(kind="alacarte", item_id=new_item_id)
+
+                s1, s2 = edit.columns(2)
+                if s1.button("Save", key=f"save_{idx}", type="primary"):
+                    st.session_state.lines.pop(idx)
+                    st.session_state.edit_idx = None
+                    merge_or_add_line(OrderLine(key=new_key, label=new_label, qty=int(new_qty)))
+                    st.rerun()
+
+                if s2.button("Cancel", key=f"cancel_{idx}"):
+                    st.session_state.edit_idx = None
+                    st.rerun()
+
+        st.divider()
+        if st.button("Clear Entire Order", type="secondary", use_container_width=True):
+            st.session_state.lines = []
+            st.session_state.edit_idx = None
+            st.rerun()
+
+st.divider()
+
+# =========================================================
+# OUTPUT
+# =========================================================
+st.subheader("Prep Output (Print / Download)")
+
+if not st.session_state.lines:
+    st.caption("Build an order above to generate the prep sheet.")
+else:
+    totals = compute_order_totals(st.session_state.lines)
+    pickup_dt, ready_dt = compute_pickup_and_ready(st.session_state.pickup_date, st.session_state.pickup_time)
+
+    st.markdown("## 1) Order Summary")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Ready time", ready_dt.strftime("%Y-%m-%d %I:%M %p"))
+    c2.metric("Pickup time", pickup_dt.strftime("%Y-%m-%d %I:%M %p"))
+    c3.metric("Headcount", int(headcount))
+    c4.metric("Utensil sets ordered", int(ordered_utensils))
+
+    recommended_utensils = int(headcount) if headcount and headcount > 0 else 0
+    if headcount > 0:
+        st.caption(f"Utensil sets recommended: {recommended_utensils}")
+
+    if headcount > 0 and ordered_utensils > 0:
+        if ordered_utensils < headcount:
+            st.error(f"Utensil check: Ordered {int(ordered_utensils)} but headcount is {int(headcount)}. Recommend at least {int(recommended_utensils)}.")
+        elif ordered_utensils > headcount * 1.25:
+            st.info(f"Utensil check: Ordered {int(ordered_utensils)} for headcount {int(headcount)}. That’s plenty. Recommend ~{int(recommended_utensils)}.")
+        else:
+            st.success("Utensil check: Ordered utensils look aligned with headcount.")
+    elif headcount > 0 and ordered_utensils == 0:
+        st.warning(f"No utensil count entered. Recommend ~{int(recommended_utensils)} utensil sets for headcount {int(headcount)}.")
+
+    st.markdown("## 2) Food Totals (Prep)")
+    prep_lines: List[str] = []
+
+    if totals.get("eggs_oz", 0) > 0:
+        prep_lines.append(eggs_prep_line(totals["eggs_oz"]))
+    if totals.get("red_pots_oz", 0) > 0:
+        prep_lines.append(red_pots_prep_line(totals["red_pots_oz"]))
+    if totals.get("bacon_pcs", 0) > 0:
+        prep_lines.append(bacon_prep_line(totals["bacon_pcs"]))
+    if totals.get("sausage_pcs", 0) > 0:
+        prep_lines.append(sausage_prep_line(totals["sausage_pcs"]))
+    if totals.get("ham_pcs", 0) > 0:
+        prep_lines.append(ham_prep_line(totals["ham_pcs"]))
+    if totals.get("pancakes_pcs", 0) > 0:
+        prep_lines.append(pancakes_prep_line(totals["pancakes_pcs"]))
+    if totals.get("ft_slices", 0) > 0:
+        prep_lines.append(ft_prep_line_slices(totals["ft_slices"]))
+    if totals.get("chix_strips_pcs", 0) > 0:
+        prep_lines.append(chicken_strips_prep_line(totals["chix_strips_pcs"]))
+    if totals.get("fries_oz", 0) > 0:
+        prep_lines.append(fries_prep_line(totals["fries_oz"]))
+    if totals.get("onion_rings_rings", 0) > 0:
+        prep_lines.append(onion_rings_prep_line(totals["onion_rings_rings"]))
+    if totals.get("steakburgers_pcs", 0) > 0:
+        prep_lines.append(f"Steakburgers: {int(totals['steakburgers_pcs'])} patties")
+    if totals.get("buns_ct", 0) > 0:
+        prep_lines.append(f"Burger Buns: {int(totals['buns_ct'])} buns")
+    if totals.get("powdered_sugar_cups_2oz", 0) > 0:
+        prep_lines.append(powdered_sugar_prep_line(totals["powdered_sugar_cups_2oz"]))
+
+    if totals.get("coffee_boxes", 0) > 0:
+        boxes = int(totals["coffee_boxes"])
+        packs = int(totals.get("coffee_packs", 0))
+        prep_lines.append(f"Coffee: {boxes} box(es) (brew packs: {packs})")
+
+    for k, v in totals.items():
+        if k.startswith("cold_bags::"):
+            bev = k.split("::", 1)[1]
+            bags = int(v)
+            prep_lines.append(f"Cold Beverage Bag: {bags} bag(s) | {bev} ({bags * COLD_BEV_OZ} oz total)")
+
+    for line in prep_lines:
+        st.write("• " + line)
+
+    # =====================================================
+    # Packaging Totals (WORDING FIX)
+    # - Anything "pan" => Aluminum
+    # - Anything "base" => IHOP plastic
+    # =====================================================
+    st.markdown("## 3) Packaging Totals")
+    pack_rows = []
+    if totals.get("half_pans", 0) > 0:
+        pack_rows.append({"Packaging": "Aluminum Half Pans", "Total": int(totals["half_pans"])})
+    if totals.get("large_bases", 0) > 0:
+        pack_rows.append({"Packaging": "IHOP Plastic Large Bases", "Total": int(totals["large_bases"])})
+    if pack_rows:
+        st.dataframe(pd.DataFrame(pack_rows), width="stretch", hide_index=True)
+    else:
+        st.caption("No packaging totals calculated for this order.")
+
+    st.markdown("## 4) Condiments")
+    cond_map = [
+        ("butter_ct", "Butter Packets"),
+        ("syrup_ct", "Syrup Packets"),
+        ("ketchup_ct", "Ketchup Packets"),
+        ("mayo_ct", "Mayo Packets"),
+        ("mustard_ct", "Mustard Packets"),
+        ("powdered_sugar_cups_2oz", "Powdered Sugar (2 oz cups)"),
+    ]
+    cond_rows = []
+    for key, label in cond_map:
+        if totals.get(key, 0) > 0:
+            cond_rows.append({"Condiment": label, "Total": int(totals[key])})
+    if cond_rows:
+        st.dataframe(pd.DataFrame(cond_rows), width="stretch", hide_index=True)
+    else:
+        st.caption("No condiment totals calculated for this order.")
+
+    st.markdown("## 5) Serveware")
+    serve_keys = [
+        ("plates", "Plates"),
+        ("serving_tongs", "Serving Tongs"),
+        ("serving_forks", "Serving Forks"),
+        ("spoons", "Spoons"),
+    ]
+    serve_rows = []
+    for key, label in serve_keys:
+        if totals.get(key, 0) > 0:
+            serve_rows.append({"Serveware": label, "Total": int(totals[key])})
+
+    if ordered_utensils and ordered_utensils > 0:
+        serve_rows.append({"Serveware": "Utensil Sets (ordered)", "Total": int(ordered_utensils)})
+    if recommended_utensils and recommended_utensils > 0:
+        serve_rows.append({"Serveware": "Utensil Sets (recommended)", "Total": int(recommended_utensils)})
+
+    if serve_rows:
+        st.dataframe(pd.DataFrame(serve_rows), width="stretch", hide_index=True)
+    else:
+        st.caption("No serveware totals calculated for this order.")
+
+    st.markdown("## 6) Plating Reference (Guest-Facing)")
+    plating_lines = []
+    if totals.get("ft_slices", 0) > 0:
+        triangles = int(totals["ft_slices"] * 2)
+        plating_lines.append(f"French Toast: {triangles} triangles (from {int(totals['ft_slices'])} slices)")
+    if totals.get("pancakes_pcs", 0) > 0:
+        plating_lines.append(f"Buttermilk Pancakes: {int(totals['pancakes_pcs'])} pancakes")
+    if totals.get("onion_rings_rings", 0) > 0:
+        plating_lines.append(f"Onion Rings: {int(totals['onion_rings_rings'])} rings")
+    if totals.get("steakburgers_pcs", 0) > 0:
+        plating_lines.append(f"Steakburgers: {int(totals['steakburgers_pcs'])} assembled")
+
+    if plating_lines:
+        for line in plating_lines:
+            st.write("• " + line)
+    else:
+        st.caption("No plating-specific items triggered.")
+
+    st.markdown("## 7) Inventory Impact")
+    inv_box = st.container(border=True)
+    inv_rows = inventory_impact(totals)
+    if inv_rows:
+        inv_box.dataframe(pd.DataFrame(inv_rows), width="stretch", hide_index=True)
+    else:
+        inv_box.caption("No tracked inventory items triggered by this order.")
+
+    st.divider()
+    st.markdown("## Download")
+
+    export_rows: List[Dict[str, str]] = []
+    export_rows.append({"Section": "Order Meta", "Name": "Ready time", "Total": ready_dt.isoformat(sep=" ", timespec="minutes")})
+    export_rows.append({"Section": "Order Meta", "Name": "Pickup time", "Total": pickup_dt.isoformat(sep=" ", timespec="minutes")})
+    export_rows.append({"Section": "Order Meta", "Name": "Headcount", "Total": str(int(headcount))})
+    export_rows.append({"Section": "Order Meta", "Name": "Utensil sets ordered", "Total": str(int(ordered_utensils))})
+
+    for line in st.session_state.lines:
+        export_rows.append({"Section": "Order Lines", "Name": line.label, "Total": str(line.qty)})
+
+    for k, v in sorted(totals.items(), key=lambda x: x[0]):
+        export_rows.append({"Section": "Computed Totals", "Name": k, "Total": str(v)})
+
+    for r in inv_rows:
+        export_rows.append({"Section": "Inventory Impact", "Name": f"{r['Item']} (SKU {r['SKU']})", "Total": r["Impact"]})
+
+    export_df = pd.DataFrame(export_rows)
+    csv_bytes = export_df.to_csv(index=False).encode("utf-8")
+
+    st.download_button(
+        "Download Full Output (CSV)",
+        data=csv_bytes,
+        file_name=f"catering_output_{APP_VERSION}.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
