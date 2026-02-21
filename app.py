@@ -68,6 +68,53 @@ def compute_pickup_and_ready(pickup_date, pickup_time) -> Tuple[datetime, dateti
     ready_dt = pickup_dt - timedelta(minutes=10)
     return pickup_dt, ready_dt
 
+# --- Meat pack assumptions (based on what you provided) ---
+SAUSAGE_LINK_OZ = 0.8
+SAUSAGE_BAG_LB = 10.0  # 2/10 lb
+
+BACON_CASE_LB = 25.0   # 1/25 lb
+BACON_SERVINGS_PER_CASE = 225
+BACON_SLICES_PER_SERVING = 2
+BACON_SLICE_OZ = (BACON_CASE_LB * 16.0) / (BACON_SERVINGS_PER_CASE * BACON_SLICES_PER_SERVING)  # ~0.89 oz per slice
+
+
+def containers_plus_remainder_from_pcs(
+    name: str,
+    pcs: float,
+    pc_oz: float,
+    container_lb: float,
+    container_name: str,
+) -> str:
+    """
+    Formats like:
+    - Under 1 container: "Bacon: 80 pcs (≈ 4.44 lb)"
+    - Over 1 container:  "Bacon: 1 case PLUS 30 pcs (≈ 1.67 lb)"
+    Never shows "<1 case/bag".
+    """
+    if not pcs:
+        return ""
+
+    pcs_i = int(round(pcs))
+    total_oz = pcs_i * pc_oz
+    total_lb = total_oz / 16.0
+
+    full = int(total_lb // container_lb)
+    rem_lb = total_lb - (full * container_lb)
+
+    if full == 0:
+        return f"{name}: {pcs_i} pcs (≈ {total_lb:.2f} lb)"
+
+    # clean container count
+    if rem_lb <= 0.01:
+        word = container_name if full == 1 else f"{container_name}s"
+        return f"{name}: {full} {word}"
+
+    # remainder back into pcs
+    rem_oz = rem_lb * 16.0
+    rem_pcs = int(round(rem_oz / pc_oz))
+
+    word = container_name if full == 1 else f"{container_name}s"
+    return f"{name}: {full} {word} PLUS {rem_pcs} pcs (≈ {rem_lb:.2f} lb)"
 
 def _norm(s: Optional[str]) -> str:
     return (s or "").strip().lower()
@@ -634,7 +681,29 @@ def build_food_prep_lines(food: Dict[str, float]) -> List[str]:
                 bag_lb=6.0,
             )
         )
+    bacon_pcs = food.get("Bacon (pcs)", 0)
+    if bacon_pcs:
+        lines.append(
+            containers_plus_remainder_from_pcs(
+                name="Bacon",
+                pcs=bacon_pcs,
+                pc_oz=BACON_SLICE_OZ,
+                container_lb=BACON_CASE_LB,
+                container_name="case",
+            )
+        )
 
+    sausage_pcs = food.get("Pork Sausage Links (pcs)", 0)
+    if sausage_pcs:
+        lines.append(
+            containers_plus_remainder_from_pcs(
+                name="Pork Sausage Links",
+                pcs=sausage_pcs,
+                pc_oz=SAUSAGE_LINK_OZ,
+                container_lb=SAUSAGE_BAG_LB,
+                container_name="bag",
+            )
+        )
     # Keep the rest of your counts as-is
     count_keys = [
         "Buttermilk Pancakes (pcs)",
