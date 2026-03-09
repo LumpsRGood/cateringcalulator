@@ -20,7 +20,7 @@ from reportlab.pdfgen import canvas
 # App Meta
 # =========================================================
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v3.1.0"
+APP_VERSION = "v3.1.1"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -861,7 +861,17 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
     pack_count = int(block.get("pack_count", 0))
     pack_label = block.get("pack_label", "")
     if pack_count > 0 and pack_label:
-        pack_line = f"Pack in: {pack_count} {pack_label}"
+        label = pack_label
+        if pack_count == 1:
+            if label == "Aluminum ½ Pans":
+                label = "Aluminum ½ Pan"
+            elif label == "Soup Cups (8 oz)":
+                label = "Soup Cup (8 oz)"
+            elif label == "Beverage Pouches":
+                label = "Beverage Pouch"
+            elif label == "Hot Beverage Containers":
+                label = "Hot Beverage Container"
+        pack_line = f"Pack in: {pack_count} {label}"
     else:
         pack_line = ""
 
@@ -917,27 +927,38 @@ def _pdf_draw_prep_blocks(
     max_width: float,
     bottom_margin: float = 0.75 * inch,
 ) -> float:
+    item_font = "Helvetica-Bold"
+    item_size = 10
+    detail_font = "Helvetica"
+    detail_size = 10
+    pack_font = "Helvetica-Bold"
+    pack_size = 10
+    leading = 12
+
     for block in prep_blocks:
         line1, details, pack_line = format_prep_block(block)
 
-        lines = [line1]
-        lines.extend([f"  {d}" for d in details])
-        if pack_line:
-            lines.append(f"  {pack_line}")
+        block_lines: List[Tuple[str, str, int, float]] = []
+        block_lines.append((line1, item_font, item_size, x))
 
-        y = _pdf_draw_wrapped_lines(
-            c,
-            lines,
-            x,
-            y,
-            max_width=max_width,
-            font_name="Helvetica",
-            font_size=10,
-            leading=12,
-            bullet=True,
-            bottom_margin=bottom_margin,
-        )
-        y -= 2
+        for d in details:
+            block_lines.append((d, detail_font, detail_size, x + 14))
+
+        if pack_line:
+            block_lines.append((pack_line, pack_font, pack_size, x + 14))
+
+        for text, font_name, font_size, draw_x in block_lines:
+            wrapped = simpleSplit(text, font_name, font_size, max_width - (draw_x - x))
+            for w in wrapped:
+                if y <= bottom_margin:
+                    c.showPage()
+                    y = letter[1] - 0.75 * inch
+                c.setFont(font_name, font_size)
+                c.drawString(draw_x, y, w)
+                y -= leading
+
+        y -= 6
+
     return y
 
 
@@ -1299,11 +1320,16 @@ else:
     if sorted_blocks:
         for block in sorted_blocks:
             line1, details, pack_line = format_prep_block(block)
-            st.write(f"• {line1}")
+
+            st.write(f"**{line1}**")
+
             for d in details:
-                st.write(f"   {d}")
+                st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;{d}", unsafe_allow_html=True)
+
             if pack_line:
-                st.write(f"   {pack_line}")
+                st.write(f"&nbsp;&nbsp;&nbsp;&nbsp;**{pack_line}**", unsafe_allow_html=True)
+
+            st.write("")
     else:
         st.caption("None")
 
@@ -1377,7 +1403,7 @@ else:
     final_pdf = merge_order_with_checklist(order_pdf)
 
     st.download_button(
-        "Download Day-Of PDF",
+        "Download Catering Packet (Order + Checklist)",
         data=final_pdf,
         file_name=f"catering_packet_{APP_VERSION}.pdf",
         mime="application/pdf",
