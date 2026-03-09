@@ -328,6 +328,7 @@ ALACARTE_GROUPS = [
     ("Lunch (Optional)", [
         ("fries_60oz", "French Fries (60 oz)", {"fries_oz": 60, "servings": 10}),
         ("onion_rings_approx", "Onion Rings (approx. 24 rings)", {"onion_rings_rings": 24, "servings": 10}),
+        ("fruit_40oz", "Fresh Fruit (40 oz)", {"fruit_oz": 40, "servings": 10}),
     ]),
 ]
 
@@ -781,6 +782,19 @@ def compute_order_data(
                 blk["unit"] = "rings"
                 blk["pack_label"] = "Aluminum ½ Pans"
                 blk["pack_count"] = blk.get("pack_count", 0) + (2 * qty)
+
+            if "fruit_oz" in spec:
+                F("Fresh Fruit (oz)", spec["fruit_oz"] * qty)
+                P("IHOP Large Plastic Base", 1 * qty)
+                S("Serving Forks", 1 * qty)
+
+                blk = _ensure_block(prep_blocks, "fruit", "Fresh Fruit", 25)
+                blk["type"] = "bag_portion"
+                blk["total_oz"] = blk.get("total_oz", 0) + (spec["fruit_oz"] * qty)
+                blk["portion_oz"] = 4.0
+                blk["bag_lb"] = 999
+                blk["pack_label"] = "IHOP Large Plastic Base"
+                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
 
     return total_servings, food, packaging, guestware, service, cond, prep_blocks
 
