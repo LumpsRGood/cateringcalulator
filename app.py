@@ -16,8 +16,8 @@ from reportlab.lib.utils import simpleSplit
 from reportlab.pdfgen import canvas
 
 
-APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v3.1.2"
+APP_NAME = "Catering Calculator"
+APP_VERSION = "v3.2"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
 
@@ -1132,6 +1132,21 @@ st.markdown(f"""
         width: 0px;
         background: transparent;
     }}
+    /* --- NEW: Style the A La Carte Expander Header --- */
+    [data-testid="stExpander"] details summary {
+        background-color: #0579bd; /* Peachtree Blue */
+        border-radius: 0.5rem;
+        padding-top: 0.5rem;
+        padding-bottom: 0.5rem;
+    }
+    [data-testid="stExpander"] details summary p {
+        color: white !important;
+        font-weight: 800;
+        font-size: 1.1rem;
+    }
+    [data-testid="stExpander"] details summary svg {
+        color: white !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1189,7 +1204,7 @@ with col1:
             if MAIN_LABEL_TO_ID[st.session_state.main_item] == "cold_beverage":
                 st.selectbox("Beverage type", COLD_BEV_TYPES, key="cold_bev_type_main")
                 
-        if st.button("Add Main Item", type="secondary", use_container_width=True):
+        if st.button("Add Main Item", type="primary", use_container_width=True):
             item_id, qty = MAIN_LABEL_TO_ID[st.session_state.main_item], int(st.session_state.main_qty)
             if item_id == "cold_beverage":
                 bev = st.session_state.get("cold_bev_type_main", COLD_BEV_TYPES[0])
