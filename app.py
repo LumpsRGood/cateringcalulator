@@ -1092,6 +1092,20 @@ st.markdown("""
     .summary-row { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; color: #e0f2fe; }
     .summary-divider { border-top: 1px solid #38bdf8; margin: 1rem 0; }
     .summary-value { font-weight: bold; color: white; }
+    
+    /* --- NEW: Sticky Right Column --- */
+    [data-testid="column"]:nth-of-type(2) {
+        position: sticky;
+        top: 4rem; /* Leaves a little breathing room at the top */
+        max-height: calc(100vh - 6rem); /* Prevents the column from exceeding screen height */
+        overflow-y: auto; /* Allows scrolling inside the cart if it gets too long */
+    }
+    
+    /* Optional: Hides the scrollbar for a cleaner look while keeping the scroll functionality */
+    [data-testid="column"]:nth-of-type(2)::-webkit-scrollbar {
+        width: 0px;
+        background: transparent;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1112,12 +1126,9 @@ with col1:
     st.subheader("📅 Event Details")
     with st.container(border=True):
         t1, t2, t3 = st.columns(3)
-        with t1:
-            st.date_input("Pickup date", key="pickup_date")
-        with t2:
-            st.time_input("Pickup time", key="pickup_time")
-        with t3:
-            st.number_input("Headcount (Informational)", min_value=0, value=int(st.session_state.headcount), step=1, key="headcount")
+        with t1: st.date_input("Pickup date", key="pickup_date")
+        with t2: st.time_input("Pickup time", key="pickup_time")
+        with t3: st.number_input("Headcount (Informational)", min_value=0, value=int(st.session_state.headcount), step=1, key="headcount")
         
         st.markdown("**Guest Requested Items**")
         g1, g2, g3 = st.columns(3)
@@ -1149,8 +1160,7 @@ with col1:
         with m1: st.selectbox("Select item", MAIN_LABELS, key="main_item")
         with m2: st.number_input("Qty", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty")
         with m3:
-            main_item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
-            if main_item_id == "cold_beverage":
+            if MAIN_LABEL_TO_ID[st.session_state.main_item] == "cold_beverage":
                 st.selectbox("Beverage type", COLD_BEV_TYPES, key="cold_bev_type_main")
                 
         if st.button("Add Main Item", type="secondary", use_container_width=True):
@@ -1175,21 +1185,6 @@ with col1:
             key = LineKey(kind="alacarte", item_id=item_id)
             merge_or_add_line(OrderLine(key=key, label=st.session_state.al_item, qty=int(st.session_state.al_qty), canon_id=build_canon_id(key)))
             reset_alacarte_form()
-            st.rerun()
-
-    # --- 3. Current Order Management ---
-    if st.session_state.lines:
-        st.subheader("📝 Current Order")
-        for idx, line in enumerate(st.session_state.lines):
-            with st.container(border=True):
-                c1, c2 = st.columns([5, 1])
-                with c1: st.markdown(f"**{line.label}** (Qty: {line.qty})")
-                with c2: 
-                    if st.button("🗑️", key=f"remove_{idx}", use_container_width=True):
-                        remove_line(idx)
-                        st.rerun()
-        if st.button("Clear Entire Order", type="secondary"):
-            st.session_state.lines, st.session_state.edit_idx = [], None
             st.rerun()
 
 with col2:
@@ -1219,9 +1214,28 @@ with col2:
     </div>
     """, unsafe_allow_html=True)
     
+    # --- Current Order Management (Moved to col2) ---
     if not st.session_state.lines:
         st.info("Build an order on the left to generate the day-of packet.")
     else:
+        st.markdown("### 📝 Current Order")
+        for idx, line in enumerate(st.session_state.lines):
+            with st.container(border=True):
+                c1, c2 = st.columns([5, 1])
+                with c1: 
+                    st.markdown(f"**{line.label}**")
+                    st.caption(f"Qty: {line.qty}")
+                with c2: 
+                    if st.button("🗑️", key=f"remove_{idx}", use_container_width=True):
+                        remove_line(idx)
+                        st.rerun()
+                        
+        if st.button("Clear Entire Order", type="secondary", use_container_width=True):
+            st.session_state.lines, st.session_state.edit_idx = [], None
+            st.rerun()
+
+        st.divider()
+
         # Generate the PDF dynamically
         order_pdf = generate_day_of_pdf(
             order_lines=st.session_state.lines, pickup_dt=pickup_dt, ready_dt=ready_dt,
