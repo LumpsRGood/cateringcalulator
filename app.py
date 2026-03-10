@@ -1093,7 +1093,6 @@ st.markdown(f"""
     
     /* Hero Banner Styling */
     .hero-banner {{
-        /* Gradient darkens the left side slightly so your white text pops, but leaves the right side clear for your logos */
         background: linear-gradient(to right, rgba(15, 23, 42, 0.85) 0%, rgba(15, 23, 42, 0.2) 50%, transparent 100%), url('{bg_url}');
         background-size: cover; 
         background-position: center right;
@@ -1132,21 +1131,22 @@ st.markdown(f"""
         width: 0px;
         background: transparent;
     }}
-    /* --- NEW: Style the A La Carte Expander Header --- */
-    [data-testid="stExpander"] details summary {
+
+    /* Style the A La Carte Expander Header */
+    [data-testid="stExpander"] details summary {{
         background-color: #0579bd; /* Peachtree Blue */
         border-radius: 0.5rem;
         padding-top: 0.5rem;
         padding-bottom: 0.5rem;
-    }
-    [data-testid="stExpander"] details summary p {
+    }}
+    [data-testid="stExpander"] details summary p {{
         color: white !important;
         font-weight: 800;
         font-size: 1.1rem;
-    }
-    [data-testid="stExpander"] details summary svg {
+    }}
+    [data-testid="stExpander"] details summary svg {{
         color: white !important;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
