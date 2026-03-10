@@ -1,3 +1,4 @@
+import base64
 import io
 import math
 from dataclasses import dataclass
@@ -1067,52 +1068,77 @@ def reset_alacarte_form():
 # App start & UI Layout
 # =========================================================
 
+# =========================================================
+# App start & UI Layout
+# =========================================================
+
 init_state()
 
-# Inject Custom CSS
-st.markdown("""
+# 1. Helper function to load your local image into CSS
+def get_image_base64(image_path):
+    try:
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    except FileNotFoundError:
+        return "" # Fallback if image isn't found
+
+# Load the banner you saved in the folder
+banner_b64 = get_image_base64("ihop_banner.jpg")
+bg_url = f"data:image/jpeg;base64,{banner_b64}" if banner_b64 else "https://images.unsplash.com/photo-1555244162-803834f70033?q=80&w=2070&auto=format&fit=crop"
+
+# 2. Inject Custom CSS
+st.markdown(f"""
 <style>
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .block-container {{ padding-top: 2rem; padding-bottom: 2rem; }}
     
-    .hero-banner {
-        background: linear-gradient(to right, #0f172a, rgba(15, 23, 42, 0.5)), url('https://images.unsplash.com/photo-1555244162-803834f70033?q=80&w=2070&auto=format&fit=crop');
-        background-size: cover; background-position: center;
-        padding: 3rem; border-radius: 0.75rem; color: white; margin-bottom: 2rem;
-    }
-    .hero-subtitle { color: #0579bd; font-weight: bold; text-transform: uppercase; font-size: 0.875rem; letter-spacing: 0.1em; }
-    .hero-title { font-size: 2.5rem; font-weight: 900; margin: 0.5rem 0; }
-    .hero-text { color: #e2e8f0; max-width: 32rem; margin-bottom: 0; }
+    /* Hero Banner Styling */
+    .hero-banner {{
+        /* Gradient darkens the left side slightly so your white text pops, but leaves the right side clear for your logos */
+        background: linear-gradient(to right, rgba(15, 23, 42, 0.85) 0%, rgba(15, 23, 42, 0.2) 50%, transparent 100%), url('{bg_url}');
+        background-size: cover; 
+        background-position: center right;
+        padding: 3rem; 
+        border-radius: 0.75rem; 
+        color: white; 
+        margin-bottom: 2rem;
+        min-height: 220px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+    }}
+    .hero-subtitle {{ color: #38bdf8; font-weight: bold; text-transform: uppercase; font-size: 0.875rem; letter-spacing: 0.1em; }}
+    .hero-title {{ font-size: 2.5rem; font-weight: 900; margin: 0.5rem 0; color: white; }}
+    .hero-text {{ color: #e2e8f0; max-width: 32rem; margin-bottom: 0; }}
     
-    .summary-card {
+    /* Sidebar Summary Card Styling */
+    .summary-card {{
         background-color: #0579bd; color: white; padding: 2rem;
         border-radius: 0.75rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         margin-bottom: 1rem;
-    }
-    .summary-card h3 { color: white; margin-top: 0; font-weight: 800;}
-    .summary-row { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; color: #e0f2fe; }
-    .summary-divider { border-top: 1px solid #38bdf8; margin: 1rem 0; }
-    .summary-value { font-weight: bold; color: white; }
+    }}
+    .summary-card h3 {{ color: white; margin-top: 0; font-weight: 800;}}
+    .summary-row {{ display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-size: 0.9rem; color: #e0f2fe; }}
+    .summary-divider {{ border-top: 1px solid #38bdf8; margin: 1rem 0; }}
+    .summary-value {{ font-weight: bold; color: white; }}
     
-    /* --- NEW: Sticky Right Column --- */
-    [data-testid="column"]:nth-of-type(2) {
+    /* Sticky Right Column */
+    [data-testid="column"]:nth-of-type(2) {{
         position: sticky;
-        top: 4rem; /* Leaves a little breathing room at the top */
-        max-height: calc(100vh - 6rem); /* Prevents the column from exceeding screen height */
-        overflow-y: auto; /* Allows scrolling inside the cart if it gets too long */
-    }
-    
-    /* Optional: Hides the scrollbar for a cleaner look while keeping the scroll functionality */
-    [data-testid="column"]:nth-of-type(2)::-webkit-scrollbar {
+        top: 4rem;
+        max-height: calc(100vh - 6rem);
+        overflow-y: auto;
+    }}
+    [data-testid="column"]:nth-of-type(2)::-webkit-scrollbar {{
         width: 0px;
         background: transparent;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
-# Hero Section
+# 3. Render Hero Section
 st.markdown(f"""
 <div class="hero-banner">
-    <div class="hero-subtitle">Peachtree Partners</div>
+    <div class="hero-subtitle">Internal Tool</div>
     <div class="hero-title">{APP_NAME} {APP_VERSION}</div>
     <div class="hero-text">Calculate ingredient quantities, packaging requirements, and day-of prep workflows.</div>
 </div>
