@@ -550,8 +550,11 @@ def compute_order_data(lines):
 
                 F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
 
-                blk = ensure_block("pancakes","Buttermilk Pancakes")
-                blk["lines"].append(f'{spec["pancakes_pcs"]*qty} pcs')
+                blk = ensure_block("pancakes", "Buttermilk Pancakes")
+                blk["qty_total"] = blk.get("qty_total", 0) + (spec["pancakes_pcs"] * qty)
+                blk["unit"] = "pcs"
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += spec["half_pans_pancakes"] * qty
 
                 P("Aluminum ½ Pans", spec["half_pans_pancakes"] * qty)
 
@@ -681,6 +684,19 @@ def compute_order_data(lines):
                 blk["lines"].append(f"{spec['fruit_oz']*qty} oz")
                 blk["pack_label"]="IHOP Large Plastic Base"
                 blk["pack_count"] += qty
+
+            if "pancakes_pcs" in spec:
+                F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
+                P("Aluminum ½ Pans", 2 * qty)
+                C("Butter Packets", 20 * qty)
+                C("Syrup Packets", 20 * qty)
+                S("Serving Tongs", 2 * qty)
+
+                blk = ensure_block("pancakes", "Buttermilk Pancakes")
+                blk["qty_total"] = blk.get("qty_total", 0) + (spec["pancakes_pcs"] * qty)
+                blk["unit"] = "pcs"
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += (2 * qty)
 
             if "fries_oz" in spec:
 
@@ -836,6 +852,13 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         "Dressing",
         "Salsa",
     }
+     if "qty_total" in block:
+        unit = block.get("unit", "")
+        if unit:
+            line1 = f"{title}: {int(block['qty_total'])} {unit}"
+        else:
+            line1 = f"{title}: {int(block['qty_total'])}"
+        details = []
 
     if title == "Scrambled Eggs" and raw_lines:
         total_oz = 0
