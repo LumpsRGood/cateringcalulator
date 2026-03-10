@@ -725,7 +725,7 @@ def apply_guest_requested_toggles(
 # Prep block formatting
 # =========================================================
 
-def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
+ddef format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
     title = block["title"]
     raw_lines = block.get("lines", [])
 
@@ -735,11 +735,88 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         "Icings",
         "Salad",
         "Dressing",
+        "Salsa",
     }
 
-    if title in stacked_titles:
+    # Smart conversion blocks
+    if title == "Scrambled Eggs" and raw_lines:
+        total_oz = 0
+        for line in raw_lines:
+            if "oz" in line:
+                total_oz += float(line.replace("oz", "").strip())
+        line1 = eggs_prep_line_from_oz(total_oz)
+        details = []
+
+    elif title == POTATOES_NAME and raw_lines:
+        total_oz = 0
+        for line in raw_lines:
+            if "oz" in line:
+                total_oz += float(line.replace("oz", "").strip())
+        line1 = bag_and_portion_line_from_oz(
+            name=title,
+            total_oz=total_oz,
+            portion_oz=6.0,
+            bag_lb=6.0,
+        )
+        details = []
+
+    elif title == "French Fries" and raw_lines:
+        total_oz = 0
+        for line in raw_lines:
+            if "oz" in line:
+                total_oz += float(line.replace("oz", "").strip())
+        line1 = bag_and_portion_line_from_oz(
+            name=title,
+            total_oz=total_oz,
+            portion_oz=6.0,
+            bag_lb=6.0,
+        )
+        details = []
+
+    elif title == "Fresh Fruit" and raw_lines:
+        total_oz = 0
+        for line in raw_lines:
+            if "oz" in line:
+                total_oz += float(line.replace("oz", "").strip())
+        total_portions = int(round(total_oz / 4.0))
+        total_lb = ounces_to_lbs(total_oz)
+        line1 = f"{title}: {int(total_oz)} oz ({total_portions} portions / {total_lb:.2f} lb)"
+        details = []
+
+    elif title == "Bacon" and raw_lines:
+        total_pcs = 0
+        for line in raw_lines:
+            if "slices" in line:
+                total_pcs += int(line.replace("slices", "").strip())
+        line1 = containers_plus_remainder_from_pcs(
+            name=title,
+            pcs=total_pcs,
+            pc_oz=BACON_SLICE_OZ,
+            container_lb=BACON_CASE_LB,
+            container_name="case",
+            piece_name="slices",
+        )
+        details = []
+
+    elif title == "Pork Sausage Links" and raw_lines:
+        total_pcs = 0
+        for line in raw_lines:
+            if "links" in line:
+                total_pcs += int(line.replace("links", "").strip())
+        line1 = containers_plus_remainder_from_pcs(
+            name=title,
+            pcs=total_pcs,
+            pc_oz=SAUSAGE_LINK_OZ,
+            container_lb=SAUSAGE_BAG_LB,
+            container_name="bag",
+            piece_name="links",
+        )
+        details = []
+
+    elif title in stacked_titles:
         line1 = f"{title}:"
         details = raw_lines
+
     else:
         if raw_lines:
             line1 = f"{title}: {raw_lines[0]}"
@@ -767,9 +844,6 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         pack_line = ""
 
     return line1, details, pack_line
-
-def get_sorted_prep_blocks(prep_blocks: Dict[str, Dict]) -> List[Dict]:
-    return sorted(prep_blocks.values(), key=lambda x: x.get("title", ""))
 
 # =========================================================
 # PDF helpers
