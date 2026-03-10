@@ -840,6 +840,9 @@ def apply_guest_requested_toggles(
 # =========================================================
 # Prep block formatting
 # =========================================================
+# =========================================================
+# Prep block formatting
+# =========================================================
 def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
     title = block["title"]
     raw_lines = block.get("lines", [])
@@ -852,7 +855,8 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         "Dressing",
         "Salsa",
     }
-     if "qty_total" in block:
+
+    if "qty_total" in block:
         unit = block.get("unit", "")
         if unit:
             line1 = f"{title}: {int(block['qty_total'])} {unit}"
@@ -860,7 +864,7 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
             line1 = f"{title}: {int(block['qty_total'])}"
         details = []
 
-    if title == "Scrambled Eggs" and raw_lines:
+    elif title == "Scrambled Eggs" and raw_lines:
         total_oz = 0
         for line in raw_lines:
             if "oz" in line:
