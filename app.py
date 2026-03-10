@@ -9,27 +9,25 @@ import pandas as pd
 import streamlit as st
 from pypdf import PdfReader, PdfWriter
 
-# PDF (ReportLab)
 from reportlab.lib.pagesizes import letter
-from reportlab.lib.pdfencrypt import StandardEncryption
 from reportlab.lib.units import inch
 from reportlab.lib.utils import simpleSplit
 from reportlab.pdfgen import canvas
 
-# =========================================================
-# App Meta
-# =========================================================
+
 APP_NAME = "IHOP Catering Calculator"
-APP_VERSION = "v3.1.1"
+APP_VERSION = "v3.1.2"
 
 st.set_page_config(page_title=f"{APP_NAME} {APP_VERSION}", layout="wide")
+
 
 # =========================================================
 # Data model
 # =========================================================
+
 @dataclass(frozen=True)
 class LineKey:
-    kind: str  # "combo" | "main" | "alacarte"
+    kind: str
     item_id: str
     protein: Optional[str] = None
     griddle: Optional[str] = None
@@ -47,6 +45,7 @@ class OrderLine:
 # =========================================================
 # Helpers
 # =========================================================
+
 def ceil_to_increment(x: float, inc: float) -> float:
     return math.ceil(x / inc) * inc
 
@@ -62,7 +61,7 @@ def ounces_to_lbs(oz: float) -> float:
     return oz / 16.0
 
 
-def compute_pickup_and_ready(pickup_date, pickup_time) -> Tuple[datetime, datetime]:
+def compute_pickup_and_ready(pickup_date, pickup_time):
     pickup_dt = datetime.combine(pickup_date, pickup_time)
     ready_dt = pickup_dt - timedelta(minutes=10)
     return pickup_dt, ready_dt
@@ -73,12 +72,21 @@ def _norm(s: Optional[str]) -> str:
 
 
 def build_canon_id(key: LineKey) -> str:
+
     if key.kind == "combo":
-        return "combo|" + "|".join([_norm(key.item_id), _norm(key.protein), _norm(key.griddle)])
+        return "combo|" + "|".join([
+            _norm(key.item_id),
+            _norm(key.protein),
+            _norm(key.griddle)
+        ])
+
     if key.kind in ("main", "alacarte"):
+
         if _norm(key.item_id) == "cold_beverage":
             return f"{key.kind}|cold_beverage|" + _norm(key.beverage_type)
-        return f"{key.kind}|" + _norm(key.item_id)
+
+        return f"{key.kind}|{_norm(key.item_id)}"
+
     return _norm(key.kind) + "|" + _norm(key.item_id)
 
 
@@ -90,141 +98,30 @@ def _drop(d: Dict[str, float], k: str):
     if k in d:
         d.pop(k, None)
 
-
 # =========================================================
-# Meat / bag helpers
+# Naming
 # =========================================================
-SAUSAGE_LINK_OZ = 0.8
-SAUSAGE_BAG_LB = 10.0
 
-BACON_CASE_LB = 25.0
-BACON_SERVINGS_PER_CASE = 225
-BACON_SLICES_PER_SERVING = 2
-BACON_SLICE_OZ = (BACON_CASE_LB * 16.0) / (BACON_SERVINGS_PER_CASE * BACON_SLICES_PER_SERVING)
-
-
-def containers_plus_remainder_from_pcs(
-    name: str,
-    pcs: float,
-    pc_oz: float,
-    container_lb: float,
-    container_name: str,
-    piece_name: str,
-) -> str:
-    if not pcs:
-        return ""
-
-    pcs_i = int(round(pcs))
-    total_oz = pcs_i * pc_oz
-    total_lb = total_oz / 16.0
-
-    full = int(total_lb // container_lb)
-    rem_lb = total_lb - (full * container_lb)
-
-    if full == 0:
-        return f"{name}: {pcs_i} {piece_name} (≈ {total_lb:.2f} lb)"
-
-    if rem_lb <= 0.01:
-        word = container_name if full == 1 else f"{container_name}s"
-        return f"{name}: {full} {word}"
-
-    rem_oz = rem_lb * 16.0
-    rem_pcs = int(round(rem_oz / pc_oz))
-    word = container_name if full == 1 else f"{container_name}s"
-    return f"{name}: {full} {word} PLUS {rem_pcs} {piece_name} (≈ {rem_lb:.2f} lb)"
-
-
-def bag_and_portion_line_from_oz(
-    name: str,
-    total_oz: float,
-    portion_oz: float,
-    bag_lb: float,
-) -> str:
-    if not total_oz:
-        return ""
-
-    total_lb = ounces_to_lbs(total_oz)
-    total_portions = int(round(total_oz / portion_oz))
-
-    full_bags = int(total_lb // bag_lb)
-    rem_lb = total_lb - (full_bags * bag_lb)
-    rem_oz = rem_lb * 16
-
-    if full_bags == 0:
-        return f"{name}: {int(total_oz)} oz ({total_portions} portions / {total_lb:.2f} lb)"
-
-    if rem_oz <= 0.01:
-        bag_word = "bag" if full_bags == 1 else "bags"
-        return f"{name}: {full_bags} {bag_word}"
-
-    rem_portions = int(round(rem_oz / portion_oz))
-    bag_word = "bag" if full_bags == 1 else "bags"
-    return f"{name}: {full_bags} {bag_word} PLUS {int(round(rem_oz))} oz ({rem_portions} portions / {rem_lb:.2f} lb)"
-
-
-def eggs_prep_line_from_oz(eggs_oz: float) -> str:
-    if not eggs_oz:
-        return ""
-
-    total_lb = ounces_to_lbs(eggs_oz)
-    bag_lb = 20.0
-    qt_per_lb = 0.465
-
-    full_bags = int(total_lb // bag_lb)
-    rem_lb = total_lb - (full_bags * bag_lb)
-
-    rem_qt = rem_lb * qt_per_lb
-    rem_qt_r = friendly_round_up(rem_qt, inc=0.5, tiny_over=0.05)
-
-    total_qt = total_lb * qt_per_lb
-    total_qt_r = friendly_round_up(total_qt, inc=0.5, tiny_over=0.05)
-
-    if full_bags == 0:
-        return f"Scrambled Eggs: {total_qt_r:g} qt"
-
-    if rem_qt_r <= 0:
-        bag_word = "bag" if full_bags == 1 else "bags"
-        return f"Scrambled Eggs: {full_bags} {bag_word}"
-
-    bag_word = "bag" if full_bags == 1 else "bags"
-    return f"Scrambled Eggs: {full_bags} {bag_word} PLUS {rem_qt_r:g} qt"
-
-
-def merge_order_with_checklist(order_pdf_bytes: bytes) -> bytes:
-    writer = PdfWriter()
-
-    order_reader = PdfReader(io.BytesIO(order_pdf_bytes))
-    for page in order_reader.pages:
-        writer.add_page(page)
-
-    checklist_path = Path(__file__).with_name("checklist.pdf")
-    if checklist_path.exists():
-        checklist_reader = PdfReader(str(checklist_path))
-        for page in checklist_reader.pages:
-            writer.add_page(page)
-
-    output = io.BytesIO()
-    writer.write(output)
-    output.seek(0)
-    return output.read()
-
-
-# =========================================================
-# Your naming / parlance
-# =========================================================
 POTATOES_NAME = "Red Pots"
 HAM_NAME = "Sampler Ham"
 
-# =========================================================
-# Core choices
-# =========================================================
-PROTEINS = ["Bacon", "Pork Sausage Links", HAM_NAME]
-GRIDDLE_CHOICES = ["Buttermilk Pancakes", "French Toast"]
+PROTEINS = [
+    "Bacon",
+    "Pork Sausage Links",
+    HAM_NAME,
+]
+
+GRIDDLE_CHOICES = [
+    "Buttermilk Pancakes",
+    "French Toast",
+]
 
 # =========================================================
 # Combo specs
 # =========================================================
+
 COMBO_TIERS = {
+
     "Small Combo Box": {
         "servings": 10,
         "eggs_oz": 40,
@@ -245,6 +142,7 @@ COMBO_TIERS = {
         "serving_tongs": 2,
         "serving_spoons": 0,
     },
+
     "Medium Combo Box": {
         "servings": 20,
         "eggs_oz": 80,
@@ -265,6 +163,7 @@ COMBO_TIERS = {
         "serving_tongs": 2,
         "serving_spoons": 0,
     },
+
     "Large Combo Box": {
         "servings": 40,
         "eggs_oz": 160,
@@ -290,16 +189,26 @@ COMBO_TIERS = {
 # =========================================================
 # Main items
 # =========================================================
-COLD_BEV_TYPES = ["Apple Juice", "Orange Juice", "Iced Tea", "Lemonade", "Soda"]
+
+COLD_BEV_TYPES = [
+    "Apple Juice",
+    "Orange Juice",
+    "Iced Tea",
+    "Lemonade",
+    "Soda",
+]
 
 MAIN_ITEMS = [
+
     ("steakburgers_10", "Steakburgers (10 pcs)"),
     ("crispy_chx_sand_10", "Crispy Chicken Sandwiches (10 pcs)"),
     ("grilled_chx_sand_10", "Grilled Chicken Sandwiches (10 pcs)"),
     ("chicken_strips_40", "Chicken Strips (40 pcs)"),
+
     ("cold_beverage", "Cold Beverage (128 oz)"),
     ("coffee_box", "Coffee Box (96 oz)"),
 ]
+
 MAIN_LABELS = [label for _, label in MAIN_ITEMS]
 MAIN_LABEL_TO_ID = {label: item_id for item_id, label in MAIN_ITEMS}
 
@@ -311,493 +220,459 @@ MAIN_SERVINGS = {
 }
 
 # =========================================================
-# À la carte
+# À la carte groups
 # =========================================================
+
 ALACARTE_GROUPS = [
+
     ("Griddle (Optional)", [
-        ("pancakes_20", "Buttermilk Pancakes (20 pcs)", {"pancakes_pcs": 20, "servings": 20}),
-        ("ft_10_slices", "French Toast (10 slices)", {"ft_slices": 10, "servings": 10}),
+
+        ("pancakes_20", "Buttermilk Pancakes (20 pcs)", {
+            "pancakes_pcs": 20,
+            "servings": 20
+        }),
+
+        ("ft_10_slices", "French Toast (10 slices)", {
+            "ft_slices": 10,
+            "servings": 10
+        }),
     ]),
+
     ("Breakfast (Optional)", [
-        ("eggs_40oz", "Scrambled Eggs (40 oz)", {"eggs_oz": 40, "servings": 10}),
-        ("red_pots_40oz", f"{POTATOES_NAME} (40 oz)", {"red_pots_oz": 40, "servings": 10}),
-        ("bacon_20", "Bacon (20 pcs)", {"bacon_pcs": 20, "servings": 10}),
-        ("sausage_20", "Pork Sausage Links (20 pcs)", {"sausage_pcs": 20, "servings": 10}),
-        ("ham_20", f"{HAM_NAME} (20 pcs)", {"ham_pcs": 20, "servings": 10}),
+
+        ("eggs_40oz", "Scrambled Eggs (40 oz)", {
+            "eggs_oz": 40,
+            "servings": 10
+        }),
+
+        ("red_pots_40oz", f"{POTATOES_NAME} (40 oz)", {
+            "red_pots_oz": 40,
+            "servings": 10
+        }),
+
+        ("bacon_20", "Bacon (20 pcs)", {
+            "bacon_pcs": 20,
+            "servings": 10
+        }),
+
+        ("sausage_20", "Pork Sausage Links (20 pcs)", {
+            "sausage_pcs": 20,
+            "servings": 10
+        }),
+
+        ("ham_20", f"{HAM_NAME} (20 pcs)", {
+            "ham_pcs": 20,
+            "servings": 10
+        }),
+
+        ("burritos_10", "Classic Breakfast Burritos (10 pcs)", {
+            "burritos_pcs": 10,
+            "servings": 10
+        }),
+
+        ("donut_dippers_70", "Donut Dippers (70 pcs)", {
+            "donut_holes_pcs": 70,
+            "servings": 10
+        }),
     ]),
+
     ("Lunch (Optional)", [
-        ("fries_60oz", "French Fries (60 oz)", {"fries_oz": 60, "servings": 10}),
-        ("onion_rings_approx", "Onion Rings (approx. 24 rings)", {"onion_rings_rings": 24, "servings": 10}),
-        ("fruit_40oz", "Fresh Fruit (40 oz)", {"fruit_oz": 40, "servings": 10}),
+
+        ("fries_60oz", "French Fries (60 oz)", {
+            "fries_oz": 60,
+            "servings": 10
+        }),
+
+        ("onion_rings_approx", "Onion Rings (approx. 24 rings)", {
+            "onion_rings_rings": 24,
+            "servings": 10
+        }),
+
+        ("fruit_40oz", "Fresh Fruit (40 oz)", {
+            "fruit_oz": 40,
+            "servings": 10
+        }),
+
+        ("salad_10", "Salad (10 servings)", {
+            "salad_10": 1,
+            "servings": 10
+        }),
+    ]),
+
+    ("Toppings / Cold Items (Optional)", [
+
+        ("strawberry_topping_40oz", "Strawberry Topping (40 oz)", {
+            "strawberry_topping_oz": 40,
+            "servings": 0
+        }),
+
+        ("blueberry_topping_40oz", "Blueberry Topping (40 oz)", {
+            "blueberry_topping_oz": 40,
+            "servings": 0
+        }),
     ]),
 ]
 
-ALACARTE_LOOKUP: Dict[str, Dict] = {}
-ALACARTE_LABELS: List[str] = []
-AL_LABEL_TO_ID: Dict[str, str] = {}
+ALACARTE_LOOKUP = {}
+ALACARTE_LABELS = []
+AL_LABEL_TO_ID = {}
+
 for group_name, items in ALACARTE_GROUPS:
     for item_id, label, payload in items:
-        ALACARTE_LOOKUP[item_id] = {"label": label, "payload": payload, "group": group_name}
+
+        ALACARTE_LOOKUP[item_id] = {
+            "label": label,
+            "payload": payload,
+            "group": group_name,
+        }
+
         ALACARTE_LABELS.append(label)
         AL_LABEL_TO_ID[label] = item_id
 
-
 # =========================================================
-# Session state
+# Order calculation engine
 # =========================================================
-def init_state():
-    if "lines" not in st.session_state:
-        st.session_state.lines: List[OrderLine] = []
-    if "edit_idx" not in st.session_state:
-        st.session_state.edit_idx = None
 
-    st.session_state.setdefault("_reset_combo", False)
-    st.session_state.setdefault("_reset_main", False)
-    st.session_state.setdefault("_reset_alacarte", False)
+def compute_order_data(lines):
 
-    if st.session_state._reset_combo:
-        st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
-        st.session_state.combo_protein = PROTEINS[0]
-        st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
-        st.session_state.combo_qty = 1
-        st.session_state._reset_combo = False
-    else:
-        st.session_state.setdefault("combo_tier", list(COMBO_TIERS.keys())[0])
-        st.session_state.setdefault("combo_protein", PROTEINS[0])
-        st.session_state.setdefault("combo_griddle", GRIDDLE_CHOICES[0])
-        st.session_state.setdefault("combo_qty", 1)
-
-    if st.session_state._reset_main:
-        st.session_state.main_item = MAIN_LABELS[0]
-        st.session_state.main_qty = 1
-        st.session_state.cold_bev_type_main = COLD_BEV_TYPES[0]
-        st.session_state._reset_main = False
-    else:
-        st.session_state.setdefault("main_item", MAIN_LABELS[0])
-        st.session_state.setdefault("main_qty", 1)
-        st.session_state.setdefault("cold_bev_type_main", COLD_BEV_TYPES[0])
-
-    if st.session_state._reset_alacarte:
-        st.session_state.al_item = ALACARTE_LABELS[0]
-        st.session_state.al_qty = 1
-        st.session_state._reset_alacarte = False
-    else:
-        st.session_state.setdefault("al_item", ALACARTE_LABELS[0])
-        st.session_state.setdefault("al_qty", 1)
-
-    st.session_state.setdefault("pickup_date", datetime.now().date())
-    st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
-
-    # informational only
-    st.session_state.setdefault("headcount", 0)
-
-    # guest requested toggles
-    st.session_state.setdefault("req_plates", True)
-    st.session_state.setdefault("req_utensils", True)
-    st.session_state.setdefault("req_napkins", True)
-
-
-def merge_or_add_line(new_line: OrderLine):
-    for i, line in enumerate(st.session_state.lines):
-        if getattr(line, "canon_id", "") == new_line.canon_id:
-            st.session_state.lines[i].qty += new_line.qty
-            return
-    st.session_state.lines.append(new_line)
-
-
-def remove_line(idx: int):
-    st.session_state.lines.pop(idx)
-    if st.session_state.edit_idx == idx:
-        st.session_state.edit_idx = None
-
-
-def reset_combo_form():
-    st.session_state._reset_combo = True
-
-
-def reset_main_form():
-    st.session_state._reset_main = True
-
-
-def reset_alacarte_form():
-    st.session_state._reset_alacarte = True
-
-
-# =========================================================
-# Prep blocks helper
-# =========================================================
-def _ensure_block(blocks: Dict[str, Dict], key: str, title: str, sort: int):
-    if key not in blocks:
-        blocks[key] = {"title": title, "sort": sort}
-    return blocks[key]
-
-
-# =========================================================
-# Buckets + servings + prep blocks
-# =========================================================
-def compute_order_data(
-    lines: List[OrderLine],
-) -> Tuple[int, Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, float], Dict[str, Dict]]:
     total_servings = 0
-    food: Dict[str, float] = {}
-    packaging: Dict[str, float] = {}
-    guestware: Dict[str, float] = {}
-    service: Dict[str, float] = {}
-    cond: Dict[str, float] = {}
-    prep_blocks: Dict[str, Dict] = {}
 
-    def F(k, v): _add(food, k, v)
-    def P(k, v): _add(packaging, k, v)
-    def G(k, v): _add(guestware, k, v)
-    def S(k, v): _add(service, k, v)
-    def C(k, v): _add(cond, k, v)
+    food = {}
+    packaging = {}
+    guestware = {}
+    service = {}
+    cond = {}
+
+    prep_blocks = {}
+
+    def F(k,v): _add(food,k,v)
+    def P(k,v): _add(packaging,k,v)
+    def G(k,v): _add(guestware,k,v)
+    def S(k,v): _add(service,k,v)
+    def C(k,v): _add(cond,k,v)
+
+    def ensure_block(key,title):
+
+        if key not in prep_blocks:
+            prep_blocks[key] = {
+                "title": title,
+                "lines": [],
+                "pack_label": None,
+                "pack_count": 0
+            }
+
+        return prep_blocks[key]
 
     for line in lines:
+
         qty = int(line.qty)
 
+        # =========================================================
+        # COMBOS
+        # =========================================================
+
         if line.key.kind == "combo":
+
             tier = line.key.item_id
             protein = line.key.protein
             griddle = line.key.griddle
-            spec = COMBO_TIERS[tier]
-            total_servings += int(spec["servings"] * qty)
 
-            # Eggs
+            spec = COMBO_TIERS[tier]
+
+            total_servings += spec["servings"] * qty
+
+            # eggs
             F("Scrambled Eggs (oz)", spec["eggs_oz"] * qty)
             P("Aluminum ½ Pans", spec["half_pans_eggs"] * qty)
-            blk = _ensure_block(prep_blocks, "eggs", "Scrambled Eggs", 10)
-            blk["type"] = "eggs"
-            blk["eggs_oz"] = blk.get("eggs_oz", 0) + (spec["eggs_oz"] * qty)
-            blk["pack_label"] = "Aluminum ½ Pans"
-            blk["pack_count"] = blk.get("pack_count", 0) + (spec["half_pans_eggs"] * qty)
 
-            # Red pots
+            blk = ensure_block("eggs","Scrambled Eggs")
+            blk["lines"].append(f'{spec["eggs_oz"]*qty} oz')
+            blk["pack_label"] = "Aluminum ½ Pans"
+            blk["pack_count"] += spec["half_pans_eggs"] * qty
+
+            # red pots
             F(f"{POTATOES_NAME} (oz)", spec["red_pots_oz"] * qty)
             P("Aluminum ½ Pans", spec["half_pans_red_pots"] * qty)
-            blk = _ensure_block(prep_blocks, "red_pots", POTATOES_NAME, 20)
-            blk["type"] = "bag_portion"
-            blk["total_oz"] = blk.get("total_oz", 0) + (spec["red_pots_oz"] * qty)
-            blk["portion_oz"] = 6.0
-            blk["bag_lb"] = 6.0
-            blk["pack_label"] = "Aluminum ½ Pans"
-            blk["pack_count"] = blk.get("pack_count", 0) + (spec["half_pans_red_pots"] * qty)
 
-            # Protein
+            blk = ensure_block("redpots",POTATOES_NAME)
+            blk["lines"].append(f'{spec["red_pots_oz"]*qty} oz')
+            blk["pack_label"] = "Aluminum ½ Pans"
+            blk["pack_count"] += spec["half_pans_red_pots"] * qty
+
+            # protein
+
             if protein == "Bacon":
+
                 F("Bacon (pcs)", spec["protein_pcs"] * qty)
-                P("IHOP Large Plastic Base", spec["ihop_large_bases_protein"] * qty)
-                blk = _ensure_block(prep_blocks, "bacon", "Bacon", 30)
-                blk["type"] = "meat_pcs"
-                blk["pcs"] = blk.get("pcs", 0) + (spec["protein_pcs"] * qty)
-                blk["pc_oz"] = BACON_SLICE_OZ
-                blk["container_lb"] = BACON_CASE_LB
-                blk["container_name"] = "case"
-                blk["piece_name"] = "slices"
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (spec["ihop_large_bases_protein"] * qty)
+
+                blk = ensure_block("bacon","Bacon")
+                blk["lines"].append(f'{spec["protein_pcs"]*qty} slices')
 
             elif protein == "Pork Sausage Links":
+
                 F("Pork Sausage Links (pcs)", spec["protein_pcs"] * qty)
-                P("IHOP Large Plastic Base", spec["ihop_large_bases_protein"] * qty)
-                blk = _ensure_block(prep_blocks, "sausage", "Pork Sausage Links", 31)
-                blk["type"] = "meat_pcs"
-                blk["pcs"] = blk.get("pcs", 0) + (spec["protein_pcs"] * qty)
-                blk["pc_oz"] = SAUSAGE_LINK_OZ
-                blk["container_lb"] = SAUSAGE_BAG_LB
-                blk["container_name"] = "bag"
-                blk["piece_name"] = "links"
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (spec["ihop_large_bases_protein"] * qty)
 
-            elif protein == HAM_NAME:
-                F(f"{HAM_NAME} (pcs)", spec["protein_pcs"] * qty)
-                P("IHOP Large Plastic Base", spec["ihop_large_bases_protein"] * qty)
-                blk = _ensure_block(prep_blocks, "ham", HAM_NAME, 32)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["protein_pcs"] * qty)
-                blk["unit"] = "pcs"
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (spec["ihop_large_bases_protein"] * qty)
+                blk = ensure_block("sausage","Pork Sausage Links")
+                blk["lines"].append(f'{spec["protein_pcs"]*qty} links')
 
-            # Griddle
-            if griddle == "Buttermilk Pancakes":
-                F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
-                P("Aluminum ½ Pans", spec["half_pans_pancakes"] * qty)
-                blk = _ensure_block(prep_blocks, "pancakes", "Buttermilk Pancakes", 40)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["pancakes_pcs"] * qty)
-                blk["unit"] = "pancakes"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (spec["half_pans_pancakes"] * qty)
             else:
-                F("French Toast (slices)", spec["ft_slices"] * qty)
-                P("Aluminum ½ Pans", spec["half_pans_ft"] * qty)
-                C("Powdered Sugar Cups (2 oz)", spec["powdered_sugar_cups_2oz"] * qty)
-                blk = _ensure_block(prep_blocks, "french_toast", "French Toast", 41)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["ft_slices"] * qty)
-                blk["unit"] = "slices"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (spec["half_pans_ft"] * qty)
 
-            # Condiments
+                F(f"{HAM_NAME} (pcs)", spec["protein_pcs"] * qty)
+
+                blk = ensure_block("ham",HAM_NAME)
+                blk["lines"].append(f'{spec["protein_pcs"]*qty} pcs')
+
+            P("IHOP Large Plastic Base", spec["ihop_large_bases_protein"] * qty)
+
+            # griddle
+
+            if griddle == "Buttermilk Pancakes":
+
+                F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
+
+                blk = ensure_block("pancakes","Buttermilk Pancakes")
+                blk["lines"].append(f'{spec["pancakes_pcs"]*qty} pcs')
+
+                P("Aluminum ½ Pans", spec["half_pans_pancakes"] * qty)
+
+            else:
+
+                F("French Toast (slices)", spec["ft_slices"] * qty)
+
+                blk = ensure_block("ft","French Toast")
+                blk["lines"].append(f'{spec["ft_slices"]*qty} slices')
+
+                P("Aluminum ½ Pans", spec["half_pans_ft"] * qty)
+
+                C("Powdered Sugar Cups (2 oz)", spec["powdered_sugar_cups_2oz"] * qty)
+
             C("Butter Packets", spec["butter_packets"] * qty)
             C("Syrup Packets", spec["syrup_packets"] * qty)
             C("Ketchup Packets", spec["ketchup_packets"] * qty)
 
-            # Serving tools
             S("Serving Tongs", spec["serving_tongs"] * qty)
             S("Serving Forks", spec["serving_forks"] * qty)
-            if spec.get("serving_spoons", 0) > 0:
-                S("Serving Spoons", spec["serving_spoons"] * qty)
+
+        # =========================================================
+        # MAIN ITEMS
+        # =========================================================
 
         elif line.key.kind == "main":
+
             item = line.key.item_id
 
             if item in MAIN_SERVINGS:
-                total_servings += int(MAIN_SERVINGS[item] * qty)
+                total_servings += MAIN_SERVINGS[item] * qty
 
-            if item in ("steakburgers_10", "crispy_chx_sand_10", "grilled_chx_sand_10"):
-                # Main protein
-                if item == "steakburgers_10":
-                    F("Steakburger Patties (pcs)", 10 * qty)
-                    protein_title = "Steakburgers"
-                else:
-                    F("Chicken Sandwiches (pcs)", 10 * qty)
-                    protein_title = "Chicken Sandwiches"
+            if item == "chicken_strips_40":
 
-                P("Aluminum ½ Pans", 1 * qty)
-                blk = _ensure_block(prep_blocks, item + "_protein", protein_title, 50)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (10 * qty)
-                blk["unit"] = "pcs"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
+                F("Chicken Strips (pcs)",40*qty)
+                P("Aluminum ½ Pans",1*qty)
 
-                # Buns
-                F("Buns (pcs)", 10 * qty)
-                P("IHOP Large Plastic Base", 1 * qty)
-                blk = _ensure_block(prep_blocks, "buns", "Buns", 51)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (10 * qty)
-                blk["unit"] = ""
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
+                blk = ensure_block("strips","Chicken Strips")
+                blk["lines"].append(f"{40*qty} pcs")
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += 1*qty
 
-                # Toppings
-                F("Tomato Slices (pcs)", 20 * qty)
-                F("Red Onion Rings (pcs)", 20 * qty)
-                F("Lettuce Leaves (pcs)", 10 * qty)
-                F("Pickle Chips (pcs)", 50 * qty)
-                P("Aluminum ½ Pans", 1 * qty)
+                P("Soup Cups (8 oz)",3*qty)
 
-                blk = _ensure_block(prep_blocks, "sandwich_toppings", "Sandwich Toppings", 52)
-                blk["type"] = "sandwich_toppings"
-                blk["tomato"] = blk.get("tomato", 0) + (20 * qty)
-                blk["onion"] = blk.get("onion", 0) + (20 * qty)
-                blk["lettuce"] = blk.get("lettuce", 0) + (10 * qty)
-                blk["pickles"] = blk.get("pickles", 0) + (50 * qty)
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
+                S("Serving Tongs",1*qty)
+                S("Serving Spoons",3*qty)
 
-                # Sauces + pickles cups
-                P("Soup Cups (8 oz)", 3 * qty)
-                blk = _ensure_block(prep_blocks, "sandwich_sauces", "Sauces / Pickles", 53)
-                blk["type"] = "fixed_lines"
-                blk["lines"] = ["IHOP Sauce", "BBQ Sauce", "Pickles"]
-                blk["pack_label"] = "Soup Cups (8 oz)"
-                blk["pack_count"] = blk.get("pack_count", 0) + (3 * qty)
+            elif item in ["steakburgers_10","crispy_chx_sand_10","grilled_chx_sand_10"]:
 
-                # Service tools
-                S("Serving Tongs", 2 * qty)
-                S("Serving Spoons", 2 * qty)
+                F("Sandwiches (pcs)",10*qty)
+                F("Buns (pcs)",10*qty)
 
-                # Condiments
-                C("Mayo Packets", 10 * qty)
-                C("Ketchup Packets", 10 * qty)
-                C("Mustard Packets", 10 * qty)
+                P("Aluminum ½ Pans",1*qty)
+                P("IHOP Large Plastic Base",1*qty)
 
-            elif item == "chicken_strips_40":
-                F("Chicken Strips (pcs)", 40 * qty)
-                P("Aluminum ½ Pans", 1 * qty)
-                blk = _ensure_block(prep_blocks, "chicken_strips", "Chicken Strips", 60)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (40 * qty)
-                blk["unit"] = "pcs"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
+                blk = ensure_block("sandwich","Sandwiches")
+                blk["lines"].append(f"{10*qty} pcs")
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += qty
 
-                P("Soup Cups (8 oz)", 3 * qty)
-                blk = _ensure_block(prep_blocks, "strip_sauces", "Dipping Sauces", 61)
-                blk["type"] = "fixed_lines"
-                blk["lines"] = ["BBQ Sauce", "IHOP Sauce", "Ranch"]
-                blk["pack_label"] = "Soup Cups (8 oz)"
-                blk["pack_count"] = blk.get("pack_count", 0) + (3 * qty)
+                # toppings half pan (no pickles)
 
-                S("Serving Tongs", 1 * qty)
-                S("Serving Spoons", 3 * qty)
+                blk = ensure_block("sand_toppings","Sandwich Toppings")
+                blk["lines"] = [
+                    f"{20*qty} Tomato slices",
+                    f"{20*qty} Red onion rings",
+                    f"{10*qty} Lettuce leaves",
+                ]
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += qty
+
+                # sauces and pickles cups
+
+                P("Soup Cups (8 oz)",3*qty)
+
+                blk = ensure_block("sand_sauces","Sauces / Pickles")
+                blk["lines"] = [
+                    "IHOP Sauce",
+                    "BBQ Sauce",
+                    "Pickle Chips"
+                ]
+                blk["pack_label"]="Soup Cups (8 oz)"
+                blk["pack_count"] += 3*qty
 
             elif item == "cold_beverage":
-                bev = line.key.beverage_type or "Cold Beverage"
-                F(f"Cold Beverage (128 oz) - {bev}", 1 * qty)
-                P("Beverage Pouches", 1 * qty)
-                G("Cold Cups", 10 * qty)
-                G("Cold Lids", 10 * qty)
-                G("Straws", 10 * qty)
 
-                blk = _ensure_block(prep_blocks, f"coldbev_{bev}", f"Cold Beverage ({bev})", 70)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + qty
-                blk["unit"] = "bag"
-                blk["pack_label"] = "Beverage Pouches"
-                blk["pack_count"] = blk.get("pack_count", 0) + qty
+                bev = line.key.beverage_type or "Cold Beverage"
+
+                F(f"Cold Beverage - {bev}",qty)
+
+                P("Beverage Pouches",qty)
+
+                G("Cold Cups",10*qty)
+                G("Cold Lids",10*qty)
+                G("Straws",10*qty)
 
             elif item == "coffee_box":
-                F("Coffee Box (96 oz)", 1 * qty)
-                P("Hot Beverage Containers", 1 * qty)
-                G("Hot Cups", 10 * qty)
-                G("Hot Lids", 10 * qty)
-                G("Sleeves", 10 * qty)
-                G("Stirrers", 10 * qty)
-                C("Sugar Packets", 10 * qty)
-                C("Creamers", 10 * qty)
 
-                blk = _ensure_block(prep_blocks, "coffee_box", "Coffee Box", 71)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + qty
-                blk["unit"] = "box"
-                blk["pack_label"] = "Hot Beverage Containers"
-                blk["pack_count"] = blk.get("pack_count", 0) + qty
+                F("Coffee Box",qty)
+
+                P("Hot Beverage Containers",qty)
+
+                G("Hot Cups",10*qty)
+                G("Hot Lids",10*qty)
+                G("Sleeves",10*qty)
+                G("Stirrers",10*qty)
+
+                C("Sugar Packets",10*qty)
+                C("Creamers",10*qty)
+
+        # =========================================================
+        # A LA CARTE
+        # =========================================================
 
         elif line.key.kind == "alacarte":
+
             spec = ALACARTE_LOOKUP[line.key.item_id]["payload"]
-            total_servings += int(spec.get("servings", 0) * qty)
 
-            if "pancakes_pcs" in spec:
-                F("Buttermilk Pancakes (pcs)", spec["pancakes_pcs"] * qty)
-                P("Aluminum ½ Pans", 2 * qty)
-                C("Butter Packets", 20 * qty)
-                C("Syrup Packets", 20 * qty)
-                S("Serving Tongs", 2 * qty)
-
-                blk = _ensure_block(prep_blocks, "pancakes", "Buttermilk Pancakes", 40)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["pancakes_pcs"] * qty)
-                blk["unit"] = "pancakes"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (2 * qty)
-
-            if "ft_slices" in spec:
-                F("French Toast (slices)", spec["ft_slices"] * qty)
-                P("Aluminum ½ Pans", 2 * qty)
-                C("Butter Packets", 10 * qty)
-                C("Syrup Packets", 10 * qty)
-                C("Powdered Sugar Cups (2 oz)", 1 * qty)
-                S("Serving Tongs", 1 * qty)
-
-                blk = _ensure_block(prep_blocks, "french_toast", "French Toast", 41)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["ft_slices"] * qty)
-                blk["unit"] = "slices"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (2 * qty)
-
-            if "eggs_oz" in spec:
-                F("Scrambled Eggs (oz)", spec["eggs_oz"] * qty)
-                P("Aluminum ½ Pans", 1 * qty)
-                blk = _ensure_block(prep_blocks, "eggs", "Scrambled Eggs", 10)
-                blk["type"] = "eggs"
-                blk["eggs_oz"] = blk.get("eggs_oz", 0) + (spec["eggs_oz"] * qty)
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
-
-            if "red_pots_oz" in spec:
-                F(f"{POTATOES_NAME} (oz)", spec["red_pots_oz"] * qty)
-                P("Aluminum ½ Pans", 1 * qty)
-                blk = _ensure_block(prep_blocks, "red_pots", POTATOES_NAME, 20)
-                blk["type"] = "bag_portion"
-                blk["total_oz"] = blk.get("total_oz", 0) + (spec["red_pots_oz"] * qty)
-                blk["portion_oz"] = 6.0
-                blk["bag_lb"] = 6.0
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
-
-            if "bacon_pcs" in spec:
-                F("Bacon (pcs)", spec["bacon_pcs"] * qty)
-                P("IHOP Large Plastic Base", 1 * qty)
-                blk = _ensure_block(prep_blocks, "bacon", "Bacon", 30)
-                blk["type"] = "meat_pcs"
-                blk["pcs"] = blk.get("pcs", 0) + (spec["bacon_pcs"] * qty)
-                blk["pc_oz"] = BACON_SLICE_OZ
-                blk["container_lb"] = BACON_CASE_LB
-                blk["container_name"] = "case"
-                blk["piece_name"] = "slices"
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
-
-            if "sausage_pcs" in spec:
-                F("Pork Sausage Links (pcs)", spec["sausage_pcs"] * qty)
-                P("IHOP Large Plastic Base", 1 * qty)
-                blk = _ensure_block(prep_blocks, "sausage", "Pork Sausage Links", 31)
-                blk["type"] = "meat_pcs"
-                blk["pcs"] = blk.get("pcs", 0) + (spec["sausage_pcs"] * qty)
-                blk["pc_oz"] = SAUSAGE_LINK_OZ
-                blk["container_lb"] = SAUSAGE_BAG_LB
-                blk["container_name"] = "bag"
-                blk["piece_name"] = "links"
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
-
-            if "ham_pcs" in spec:
-                F(f"{HAM_NAME} (pcs)", spec["ham_pcs"] * qty)
-                P("IHOP Large Plastic Base", 1 * qty)
-                blk = _ensure_block(prep_blocks, "ham", HAM_NAME, 32)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["ham_pcs"] * qty)
-                blk["unit"] = "pcs"
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
-
-            if "fries_oz" in spec:
-                F("French Fries (oz)", spec["fries_oz"] * qty)
-                P("Aluminum ½ Pans", 1 * qty)
-                S("Serving Tongs", 1 * qty)
-                C("Ketchup Packets", 10 * qty)
-                blk = _ensure_block(prep_blocks, "fries", "French Fries", 80)
-                blk["type"] = "bag_portion"
-                blk["total_oz"] = blk.get("total_oz", 0) + (spec["fries_oz"] * qty)
-                blk["portion_oz"] = 6.0
-                blk["bag_lb"] = 6.0
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
-
-            if "onion_rings_rings" in spec:
-                F("Onion Rings (rings)", spec["onion_rings_rings"] * qty)
-                P("Aluminum ½ Pans", 2 * qty)
-                S("Serving Tongs", 1 * qty)
-                C("Ketchup Packets", 10 * qty)
-                blk = _ensure_block(prep_blocks, "onion_rings", "Onion Rings", 81)
-                blk["type"] = "simple_count"
-                blk["value"] = blk.get("value", 0) + (spec["onion_rings_rings"] * qty)
-                blk["unit"] = "rings"
-                blk["pack_label"] = "Aluminum ½ Pans"
-                blk["pack_count"] = blk.get("pack_count", 0) + (2 * qty)
+            total_servings += spec.get("servings",0) * qty
 
             if "fruit_oz" in spec:
-                F("Fresh Fruit (oz)", spec["fruit_oz"] * qty)
-                P("IHOP Large Plastic Base", 1 * qty)
-                S("Serving Forks", 1 * qty)
 
-                blk = _ensure_block(prep_blocks, "fruit", "Fresh Fruit", 25)
-                blk["type"] = "bag_portion"
-                blk["total_oz"] = blk.get("total_oz", 0) + (spec["fruit_oz"] * qty)
-                blk["portion_oz"] = 4.0
-                blk["bag_lb"] = 999
-                blk["pack_label"] = "IHOP Large Plastic Base"
-                blk["pack_count"] = blk.get("pack_count", 0) + (1 * qty)
+                P("IHOP Large Plastic Base",1*qty)
+                S("Serving Forks",1*qty)
+
+                blk = ensure_block("fruit","Fresh Fruit")
+                blk["lines"].append(f"{spec['fruit_oz']*qty} oz")
+                blk["pack_label"]="IHOP Large Plastic Base"
+                blk["pack_count"] += qty
+
+            if "fries_oz" in spec:
+
+                F("French Fries (oz)",spec["fries_oz"]*qty)
+
+                P("Aluminum ½ Pans",1*qty)
+                S("Serving Tongs",1*qty)
+
+                C("Ketchup Packets",10*qty)
+
+                blk = ensure_block("fries","French Fries")
+                blk["lines"].append(f"{spec['fries_oz']*qty} oz")
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += qty
+
+            if "onion_rings_rings" in spec:
+
+                F("Onion Rings",spec["onion_rings_rings"]*qty)
+
+                P("Aluminum ½ Pans",2*qty)
+                S("Serving Tongs",1*qty)
+
+                blk = ensure_block("rings","Onion Rings")
+                blk["lines"].append(f"{spec['onion_rings_rings']*qty} rings")
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += 2*qty
+
+            if "donut_holes_pcs" in spec:
+
+                F("Donut Dippers",spec["donut_holes_pcs"]*qty)
+
+                P("Aluminum ½ Pans",1*qty)
+                P("Soup Cups (8 oz)",4*qty)
+
+                S("Serving Spoons",4*qty)
+                S("Serving Tongs",1*qty)
+
+                blk = ensure_block("donuts","Donut Dippers")
+                blk["lines"].append(f"{spec['donut_holes_pcs']*qty} pcs")
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += qty
+
+                blk = ensure_block("donut_icings","Icings")
+                blk["lines"] = [
+                    f"{2*qty} Cream Cheese Icing Cups",
+                    f"{2*qty} Dulce de Leche Cups"
+                ]
+                blk["pack_label"]="Soup Cups (8 oz)"
+                blk["pack_count"] += 4*qty
+
+            if "burritos_pcs" in spec:
+
+                F("Breakfast Burritos",spec["burritos_pcs"]*qty)
+
+                P("Aluminum ½ Pans",2*qty)
+                P("Soup Cups (8 oz)",2*qty)
+
+                S("Serving Spoons",2*qty)
+
+                blk = ensure_block("burritos","Classic Breakfast Burritos")
+                blk["lines"].append(f"{spec['burritos_pcs']*qty} pcs")
+                blk["pack_label"]="Aluminum ½ Pans"
+                blk["pack_count"] += 2*qty
+
+            if "salad_10" in spec:
+
+                P("IHOP Large Plastic Base",1*qty)
+                P("Soup Cups (8 oz)",1*qty)
+
+                S("Serving Spoons",1*qty)
+                S("Serving Tongs",1*qty)
+
+                blk = ensure_block("salad","Salad")
+                blk["lines"] = [
+                    f"{5*qty} portions Lettuce Blend",
+                    f"{5*qty} oz Cheese",
+                    f"{5*qty} oz Tomatoes",
+                    f"{8*qty} Red Onion Rings (quartered)"
+                ]
+                blk["pack_label"]="IHOP Large Plastic Base"
+                blk["pack_count"] += qty
+
+                blk = ensure_block("salad_dressing","Dressing")
+                blk["lines"] = [f"{8*qty} oz"]
+                blk["pack_label"]="Soup Cups (8 oz)"
+                blk["pack_count"] += qty
+
+            if "strawberry_topping_oz" in spec:
+
+                P("IHOP Large Plastic Base",1*qty)
+                S("Serving Forks",1*qty)
+
+                blk = ensure_block("strawberry","Strawberry Topping")
+                blk["lines"].append(f"{spec['strawberry_topping_oz']*qty} oz")
+                blk["pack_label"]="IHOP Large Plastic Base"
+                blk["pack_count"] += qty
+
+            if "blueberry_topping_oz" in spec:
+
+                P("IHOP Large Plastic Base",1*qty)
+                S("Serving Forks",1*qty)
+
+                blk = ensure_block("blueberry","Blueberry Topping")
+                blk["lines"].append(f"{spec['blueberry_topping_oz']*qty} oz")
+                blk["pack_label"]="IHOP Large Plastic Base"
+                blk["pack_count"] += qty
 
     return total_servings, food, packaging, guestware, service, cond, prep_blocks
 
+# =========================================================
+# Guest-requested toggles
+# =========================================================
 
 def apply_guest_requested_toggles(
     total_servings: int,
@@ -821,59 +696,24 @@ def apply_guest_requested_toggles(
 
 
 # =========================================================
-# Prep block rendering
+# Prep block formatting
 # =========================================================
+
 def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
     title = block["title"]
-    block_type = block.get("type", "simple_count")
+    raw_lines = block.get("lines", [])
 
-    if block_type == "eggs":
-        line1 = eggs_prep_line_from_oz(block.get("eggs_oz", 0))
-        details = []
-    elif block_type == "bag_portion":
-        line1 = bag_and_portion_line_from_oz(
-            name=title,
-            total_oz=block.get("total_oz", 0),
-            portion_oz=block.get("portion_oz", 6.0),
-            bag_lb=block.get("bag_lb", 6.0),
-        )
-        details = []
-    elif block_type == "meat_pcs":
-        line1 = containers_plus_remainder_from_pcs(
-            name=title,
-            pcs=block.get("pcs", 0),
-            pc_oz=block.get("pc_oz", 1.0),
-            container_lb=block.get("container_lb", 1.0),
-            container_name=block.get("container_name", "bag"),
-            piece_name=block.get("piece_name", "pcs"),
-        )
-        details = []
-    elif block_type == "sandwich_toppings":
-        total_tom = int(block.get("tomato", 0))
-        total_oni = int(block.get("onion", 0))
-        total_let = int(block.get("lettuce", 0))
-        total_pic = int(block.get("pickles", 0))
-        line1 = "Sandwich Toppings:"
-        details = [
-            f"{total_tom} Tomato Slices",
-            f"{total_oni} Red Onion Rings",
-            f"{total_let} Lettuce Leaves",
-            f"{total_pic} Pickle Chips",
-        ]
-    elif block_type == "fixed_lines":
-        line1 = title + ":"
-        details = list(block.get("lines", []))
+    # Build the primary line from the first detail when available
+    if raw_lines:
+        line1 = f"{title}: {raw_lines[0]}"
+        details = raw_lines[1:]
     else:
-        value = int(block.get("value", 0))
-        unit = block.get("unit", "")
-        if unit:
-            line1 = f"{title}: {value} {unit}"
-        else:
-            line1 = f"{title}: {value}"
+        line1 = f"{title}:"
         details = []
 
     pack_count = int(block.get("pack_count", 0))
     pack_label = block.get("pack_label", "")
+
     if pack_count > 0 and pack_label:
         label = pack_label
         if pack_count == 1:
@@ -893,12 +733,13 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
 
 
 def get_sorted_prep_blocks(prep_blocks: Dict[str, Dict]) -> List[Dict]:
-    return sorted(prep_blocks.values(), key=lambda x: (x.get("sort", 999), x.get("title", "")))
+    return sorted(prep_blocks.values(), key=lambda x: x.get("title", ""))
 
 
 # =========================================================
-# PDF Generation
+# PDF helpers
 # =========================================================
+
 def _pdf_draw_section_title(c: canvas.Canvas, title: str, x: float, y: float) -> float:
     c.setFont("Helvetica-Bold", 12)
     c.drawString(x, y, title)
@@ -918,18 +759,24 @@ def _pdf_draw_wrapped_lines(
     bottom_margin: float = 0.75 * inch,
 ) -> float:
     c.setFont(font_name, font_size)
+
     for raw in lines:
         prefix = "• " if bullet else ""
+
         for para in str(raw).split("\n"):
             wrapped = simpleSplit(prefix + para, font_name, font_size, max_width)
+
             for w in wrapped:
                 if y <= bottom_margin:
                     c.showPage()
                     y = letter[1] - 0.75 * inch
                     c.setFont(font_name, font_size)
+
                 c.drawString(x, y, w)
                 y -= leading
+
             prefix = "  " if bullet else ""
+
     return y
 
 
@@ -963,10 +810,12 @@ def _pdf_draw_prep_blocks(
 
         for text, font_name, font_size, draw_x in block_lines:
             wrapped = simpleSplit(text, font_name, font_size, max_width - (draw_x - x))
+
             for w in wrapped:
                 if y <= bottom_margin:
                     c.showPage()
                     y = letter[1] - 0.75 * inch
+
                 c.setFont(font_name, font_size)
                 c.drawString(draw_x, y, w)
                 y -= leading
@@ -975,6 +824,10 @@ def _pdf_draw_prep_blocks(
 
     return y
 
+
+# =========================================================
+# PDF generation
+# =========================================================
 
 def generate_day_of_pdf(
     order_lines: List[OrderLine],
@@ -1075,14 +928,21 @@ def generate_day_of_pdf(
 
     y = _pdf_draw_section_title(c, "6) Condiment Bag", left, y)
     cond_lines = []
-    for k in ["Butter Packets", "Syrup Packets", "Ketchup Packets", "Mustard Packets", "Mayo Packets", "Sugar Packets", "Creamers", "Powdered Sugar Cups (2 oz)"]:
+    for k in [
+        "Butter Packets", "Syrup Packets", "Ketchup Packets", "Mustard Packets",
+        "Mayo Packets", "Sugar Packets", "Creamers", "Powdered Sugar Cups (2 oz)"
+    ]:
         v = cond.get(k, 0)
         if v:
             cond_lines.append(f"{k}: {int(v)}")
     y = _pdf_draw_wrapped_lines(c, cond_lines or ["None"], left, y, usable_w, bullet=True, bottom_margin=bottom)
 
     c.setFont("Helvetica-Oblique", 8)
-    c.drawRightString(width - right, bottom - 8, f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')} • {APP_VERSION}")
+    c.drawRightString(
+        width - right,
+        bottom - 8,
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %I:%M %p')} • {APP_VERSION}"
+    )
 
     c.save()
     pdf_bytes = buffer.getvalue()
@@ -1091,16 +951,92 @@ def generate_day_of_pdf(
 
 
 # =========================================================
+# Session state init
+# =========================================================
+
+def init_state():
+    if "lines" not in st.session_state:
+        st.session_state.lines = []
+    if "edit_idx" not in st.session_state:
+        st.session_state.edit_idx = None
+
+    st.session_state.setdefault("_reset_combo", False)
+    st.session_state.setdefault("_reset_main", False)
+    st.session_state.setdefault("_reset_alacarte", False)
+
+    if st.session_state._reset_combo:
+        st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
+        st.session_state.combo_protein = PROTEINS[0]
+        st.session_state.combo_griddle = GRIDDLE_CHOICES[0]
+        st.session_state.combo_qty = 1
+        st.session_state._reset_combo = False
+    else:
+        st.session_state.setdefault("combo_tier", list(COMBO_TIERS.keys())[0])
+        st.session_state.setdefault("combo_protein", PROTEINS[0])
+        st.session_state.setdefault("combo_griddle", GRIDDLE_CHOICES[0])
+        st.session_state.setdefault("combo_qty", 1)
+
+    if st.session_state._reset_main:
+        st.session_state.main_item = MAIN_LABELS[0]
+        st.session_state.main_qty = 1
+        st.session_state.cold_bev_type_main = COLD_BEV_TYPES[0]
+        st.session_state._reset_main = False
+    else:
+        st.session_state.setdefault("main_item", MAIN_LABELS[0])
+        st.session_state.setdefault("main_qty", 1)
+        st.session_state.setdefault("cold_bev_type_main", COLD_BEV_TYPES[0])
+
+    if st.session_state._reset_alacarte:
+        st.session_state.al_item = ALACARTE_LABELS[0]
+        st.session_state.al_qty = 1
+        st.session_state._reset_alacarte = False
+    else:
+        st.session_state.setdefault("al_item", ALACARTE_LABELS[0])
+        st.session_state.setdefault("al_qty", 1)
+
+    st.session_state.setdefault("pickup_date", datetime.now().date())
+    st.session_state.setdefault("pickup_time", datetime.now().replace(second=0, microsecond=0).time())
+    st.session_state.setdefault("headcount", 0)
+    st.session_state.setdefault("req_plates", True)
+    st.session_state.setdefault("req_utensils", True)
+    st.session_state.setdefault("req_napkins", True)
+
+
+def merge_or_add_line(new_line: OrderLine):
+    for i, line in enumerate(st.session_state.lines):
+        if getattr(line, "canon_id", "") == new_line.canon_id:
+            st.session_state.lines[i].qty += new_line.qty
+            return
+    st.session_state.lines.append(new_line)
+
+
+def remove_line(idx: int):
+    st.session_state.lines.pop(idx)
+    if st.session_state.edit_idx == idx:
+        st.session_state.edit_idx = None
+
+
+def reset_combo_form():
+    st.session_state._reset_combo = True
+
+
+def reset_main_form():
+    st.session_state._reset_main = True
+
+
+def reset_alacarte_form():
+    st.session_state._reset_alacarte = True
+
+
+# =========================================================
 # App start
 # =========================================================
+
 init_state()
 
 st.title(f"{APP_NAME} {APP_VERSION}")
 st.caption("Headcount is informational only. Servings drive Plates, Napkins, and Wrapped Cutlery Sets. Beverages always include cups/lids.")
 
-# =========================================================
-# Main page top
-# =========================================================
 top1, top2 = st.columns(2)
 
 with top1:
@@ -1124,10 +1060,12 @@ st.divider()
 # =========================================================
 # Build Order
 # =========================================================
+
 st.subheader("Build Order")
 
 st.markdown("### Breakfast Combo Boxes")
 b1, b2, b3, b4 = st.columns([3, 3, 3, 2])
+
 with b1:
     st.selectbox("Combo size", list(COMBO_TIERS.keys()), key="combo_tier")
 with b2:
@@ -1142,9 +1080,11 @@ if st.button("Add Combo", type="primary", use_container_width=True):
     protein = st.session_state.combo_protein
     griddle = st.session_state.combo_griddle
     qty = int(st.session_state.combo_qty)
+
     label = f"{tier} | {protein} | {griddle}"
     key = LineKey(kind="combo", item_id=tier, protein=protein, griddle=griddle)
     canon_id = build_canon_id(key)
+
     merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
     reset_combo_form()
     st.rerun()
@@ -1190,6 +1130,7 @@ with st.container(border=True):
 
     with st.expander("➕ À La Carte Items (Optional)  Click to open", expanded=False):
         a1, a2 = st.columns([6, 2])
+
         with a1:
             st.selectbox("À la carte item", ALACARTE_LABELS, key="al_item")
         with a2:
@@ -1201,6 +1142,7 @@ with st.container(border=True):
             label = st.session_state.al_item
             key = LineKey(kind="alacarte", item_id=item_id)
             canon_id = build_canon_id(key)
+
             merge_or_add_line(OrderLine(key=key, label=label, qty=qty, canon_id=canon_id))
             reset_alacarte_form()
             st.rerun()
@@ -1208,8 +1150,9 @@ with st.container(border=True):
 st.divider()
 
 # =========================================================
-# Sidebar: Current Order only
+# Sidebar
 # =========================================================
+
 with st.sidebar:
     st.subheader("Current Order")
 
@@ -1307,8 +1250,9 @@ with st.sidebar:
             st.rerun()
 
 # =========================================================
-# Output + combined PDF
+# Output
 # =========================================================
+
 st.subheader("Day-Of Output")
 
 if not st.session_state.lines:
