@@ -98,6 +98,26 @@ def _drop(d: Dict[str, float], k: str):
     if k in d:
         d.pop(k, None)
 
+def merge_order_with_checklist(order_pdf_bytes: bytes) -> bytes:
+    writer = PdfWriter()
+
+    # Add generated order PDF pages
+    order_reader = PdfReader(io.BytesIO(order_pdf_bytes))
+    for page in order_reader.pages:
+        writer.add_page(page)
+
+    # Append static checklist PDF if present
+    checklist_path = Path(__file__).with_name("checklist.pdf")
+    if checklist_path.exists():
+        checklist_reader = PdfReader(str(checklist_path))
+        for page in checklist_reader.pages:
+            writer.add_page(page)
+
+    output = io.BytesIO()
+    writer.write(output)
+    output.seek(0)
+    return output.read()
+
 # =========================================================
 # Naming
 # =========================================================
@@ -1357,7 +1377,7 @@ else:
         cond=cond,
         prep_blocks=sorted_blocks,
     )
-
+    
     final_pdf = merge_order_with_checklist(order_pdf)
 
     st.download_button(
