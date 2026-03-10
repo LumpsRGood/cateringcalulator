@@ -723,13 +723,24 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
     title = block["title"]
     raw_lines = block.get("lines", [])
 
-    # Build the primary line from the first detail when available
-    if raw_lines:
-        line1 = f"{title}: {raw_lines[0]}"
-        details = raw_lines[1:]
-    else:
+    stacked_titles = {
+        "Sandwich Toppings",
+        "Sauces / Pickles",
+        "Icings",
+        "Salad",
+        "Dressing",
+    }
+
+    if title in stacked_titles:
         line1 = f"{title}:"
-        details = []
+        details = raw_lines
+    else:
+        if raw_lines:
+            line1 = f"{title}: {raw_lines[0]}"
+            details = raw_lines[1:]
+        else:
+            line1 = f"{title}:"
+            details = []
 
     pack_count = int(block.get("pack_count", 0))
     pack_label = block.get("pack_label", "")
@@ -750,10 +761,6 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         pack_line = ""
 
     return line1, details, pack_line
-
-
-def get_sorted_prep_blocks(prep_blocks: Dict[str, Dict]) -> List[Dict]:
-    return sorted(prep_blocks.values(), key=lambda x: x.get("title", ""))
 
 
 # =========================================================
