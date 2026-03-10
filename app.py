@@ -1147,7 +1147,7 @@ with col1:
         st.markdown("**🍔 Sandwiches, Strips, Beverages**")
         m1, m2, m3 = st.columns([5, 2, 4])
         with m1: st.selectbox("Select item", MAIN_LABELS, key="main_item")
-        with m2: st.number_input("Qty", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty", key_modifier="main")
+        with m2: st.number_input("Qty", min_value=1, value=int(st.session_state.main_qty), step=1, key="main_qty")
         with m3:
             main_item_id = MAIN_LABEL_TO_ID[st.session_state.main_item]
             if main_item_id == "cold_beverage":
@@ -1169,7 +1169,7 @@ with col1:
     with st.expander("➕ Additional À La Carte Options"):
         a1, a2 = st.columns([6, 2])
         with a1: st.selectbox("À la carte item", ALACARTE_LABELS, key="al_item")
-        with a2: st.number_input("Qty", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty", key_modifier="al")
+        with a2: st.number_input("Qty", min_value=1, value=int(st.session_state.al_qty), step=1, key="al_qty")
         if st.button("Add À La Carte", use_container_width=True):
             item_id = AL_LABEL_TO_ID[st.session_state.al_item]
             key = LineKey(kind="alacarte", item_id=item_id)
