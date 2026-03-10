@@ -99,6 +99,105 @@ def _drop(d: Dict[str, float], k: str):
     if k in d:
         d.pop(k, None)
 
+# =========================================================
+# Meat / bag helpers
+# =========================================================
+
+SAUSAGE_LINK_OZ = 0.8
+SAUSAGE_BAG_LB = 10.0
+
+BACON_CASE_LB = 25.0
+BACON_SERVINGS_PER_CASE = 225
+BACON_SLICES_PER_SERVING = 2
+BACON_SLICE_OZ = (BACON_CASE_LB * 16.0) / (BACON_SERVINGS_PER_CASE * BACON_SLICES_PER_SERVING)
+
+
+def containers_plus_remainder_from_pcs(
+    name: str,
+    pcs: float,
+    pc_oz: float,
+    container_lb: float,
+    container_name: str,
+    piece_name: str,
+) -> str:
+    if not pcs:
+        return ""
+
+    pcs_i = int(round(pcs))
+    total_oz = pcs_i * pc_oz
+    total_lb = total_oz / 16.0
+
+    full = int(total_lb // container_lb)
+    rem_lb = total_lb - (full * container_lb)
+
+    if full == 0:
+        return f"{name}: {pcs_i} {piece_name} (≈ {total_lb:.2f} lb)"
+
+    if rem_lb <= 0.01:
+        word = container_name if full == 1 else f"{container_name}s"
+        return f"{name}: {full} {word}"
+
+    rem_oz = rem_lb * 16.0
+    rem_pcs = int(round(rem_oz / pc_oz))
+    word = container_name if full == 1 else f"{container_name}s"
+    return f"{name}: {full} {word} PLUS {rem_pcs} {piece_name} (≈ {rem_lb:.2f} lb)"
+
+
+def bag_and_portion_line_from_oz(
+    name: str,
+    total_oz: float,
+    portion_oz: float,
+    bag_lb: float,
+) -> str:
+    if not total_oz:
+        return ""
+
+    total_lb = ounces_to_lbs(total_oz)
+    total_portions = int(round(total_oz / portion_oz))
+
+    full_bags = int(total_lb // bag_lb)
+    rem_lb = total_lb - (full_bags * bag_lb)
+    rem_oz = rem_lb * 16
+
+    if full_bags == 0:
+        return f"{name}: {int(total_oz)} oz ({total_portions} portions / {total_lb:.2f} lb)"
+
+    if rem_oz <= 0.01:
+        bag_word = "bag" if full_bags == 1 else "bags"
+        return f"{name}: {full_bags} {bag_word}"
+
+    rem_portions = int(round(rem_oz / portion_oz))
+    bag_word = "bag" if full_bags == 1 else "bags"
+    return f"{name}: {full_bags} {bag_word} PLUS {int(round(rem_oz))} oz ({rem_portions} portions / {rem_lb:.2f} lb)"
+
+
+def eggs_prep_line_from_oz(eggs_oz: float) -> str:
+    if not eggs_oz:
+        return ""
+
+    total_lb = ounces_to_lbs(eggs_oz)
+    bag_lb = 20.0
+    qt_per_lb = 0.465
+
+    full_bags = int(total_lb // bag_lb)
+    rem_lb = total_lb - (full_bags * bag_lb)
+
+    rem_qt = rem_lb * qt_per_lb
+    rem_qt_r = friendly_round_up(rem_qt, inc=0.5, tiny_over=0.05)
+
+    total_qt = total_lb * qt_per_lb
+    total_qt_r = friendly_round_up(total_qt, inc=0.5, tiny_over=0.05)
+
+    if full_bags == 0:
+        return f"Scrambled Eggs: {total_qt_r:g} qt"
+
+    if rem_qt_r <= 0:
+        bag_word = "bag" if full_bags == 1 else "bags"
+        return f"Scrambled Eggs: {full_bags} {bag_word}"
+
+    bag_word = "bag" if full_bags == 1 else "bags"
+    return f"Scrambled Eggs: {full_bags} {bag_word} PLUS {rem_qt_r:g} qt"
+
 def merge_order_with_checklist(order_pdf_bytes: bytes) -> bytes:
     writer = PdfWriter()
 
