@@ -844,6 +844,9 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
 
     return line1, details, pack_line
 
+def get_sorted_prep_blocks(prep_blocks: Dict[str, Dict]) -> List[Dict]:
+    return sorted(prep_blocks.values(), key=lambda x: x.get("title", ""))
+
 # =========================================================
 # PDF helpers
 # =========================================================
@@ -1135,10 +1138,6 @@ def reset_main_form():
 def reset_alacarte_form():
     st.session_state._reset_alacarte = True
 
-
-# =========================================================
-# App start & UI Layout
-# =========================================================
 
 # =========================================================
 # App start & UI Layout
