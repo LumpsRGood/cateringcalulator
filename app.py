@@ -645,6 +645,12 @@ def compute_order_data(lines):
                 blk["pack_label"]="Aluminum ½ Pans"
                 blk["pack_count"] += 2*qty
 
+                # salsa cups
+                blk = ensure_block("burrito_salsa","Salsa")
+                blk["lines"].append(f"{16*qty} oz")
+                blk["pack_label"]="Soup Cups (8 oz)"
+                blk["pack_count"] += 2*qty
+
             if "salad_10" in spec:
 
                 P("IHOP Large Plastic Base",1*qty)
