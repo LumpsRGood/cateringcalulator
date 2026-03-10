@@ -762,6 +762,8 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
 
     return line1, details, pack_line
 
+def get_sorted_prep_blocks(prep_blocks: Dict[str, Dict]) -> List[Dict]:
+    return sorted(prep_blocks.values(), key=lambda x: x.get("title", ""))
 
 # =========================================================
 # PDF helpers
