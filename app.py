@@ -725,7 +725,7 @@ def apply_guest_requested_toggles(
 # Prep block formatting
 # =========================================================
 
-ddef format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
+def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
     title = block["title"]
     raw_lines = block.get("lines", [])
 
