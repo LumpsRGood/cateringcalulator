@@ -890,10 +890,6 @@ def apply_guest_requested_toggles(
         for k in ["Serving Tongs", "Serving Spoons", "Serving Forks"]:
             _drop(service, k)
 
-
-# =========================================================
-# Prep block formatting
-# =========================================================
 # =========================================================
 # Prep block formatting
 # =========================================================
@@ -1016,19 +1012,24 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
 
     pack_count = int(block.get("pack_count", 0))
     pack_label = block.get("pack_label", "")
+    large_order_active = is_large_order_active()
 
     if pack_count > 0 and pack_label:
-        label = pack_label
-        if pack_count == 1:
-            if label == "Aluminum ½ Pans":
-                label = "Aluminum ½ Pan"
-            elif label == "Soup Cups (8 oz)":
-                label = "Soup Cup (8 oz)"
-            elif label == "Beverage Pouches":
-                label = "Beverage Pouch"
-            elif label == "Hot Beverage Containers":
-                label = "Hot Beverage Container"
-        pack_line = f"Pack in: {pack_count} {label}"
+        if pack_label == "Aluminum ½ Pans":
+            pan_text = format_pan_label(pack_count, large_order_active)
+            pack_line = f"Pack in: {pan_text}"
+        else:
+            label = pack_label
+            if pack_count == 1:
+                if label == "Soup Cups (8 oz)":
+                    label = "Soup Cup (8 oz)"
+                elif label == "Beverage Pouches":
+                    label = "Beverage Pouch"
+                elif label == "Hot Beverage Containers":
+                    label = "Hot Beverage Container"
+                elif label == "IHOP Large Plastic Base":
+                    label = "IHOP Large Plastic Base"
+            pack_line = f"Pack in: {pack_count} {label}"
     else:
         pack_line = ""
 
@@ -1036,6 +1037,38 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
 
 def get_sorted_prep_blocks(prep_blocks: Dict[str, Dict]) -> List[Dict]:
     return sorted(prep_blocks.values(), key=lambda x: x.get("title", ""))
+
+def is_large_order_active() -> bool:
+    return (
+        st.session_state.get("large_order_mode", False)
+        and st.session_state.get("large_order_confirm", False)
+    )
+
+
+def format_pan_label(count: int, large_order_active: bool) -> str:
+    if count <= 0:
+        return ""
+
+    if not large_order_active:
+        if count == 1:
+            return "1 Aluminum ½ Pan"
+        return f"{count} Aluminum ½ Pans"
+
+    full_pans = count // 2
+    half_pans = count % 2
+
+    parts = []
+    if full_pans == 1:
+        parts.append("1 Aluminum Full Pan")
+    elif full_pans > 1:
+        parts.append(f"{full_pans} Aluminum Full Pans")
+
+    if half_pans == 1:
+        parts.append("1 Aluminum ½ Pan")
+    elif half_pans > 1:
+        parts.append(f"{half_pans} Aluminum ½ Pans")
+
+    return " + ".join(parts)
 
 # =========================================================
 # PDF helpers
@@ -1202,10 +1235,15 @@ def generate_day_of_pdf(
 
     y = _pdf_draw_section_title(c, "3) Packaging", left, y)
     pack_lines = []
+    large_order_active = is_large_order_active()
+
     for k in ["Aluminum ½ Pans", "IHOP Large Plastic Base", "Soup Cups (8 oz)", "Beverage Pouches", "Hot Beverage Containers"]:
         v = packaging.get(k, 0)
         if v:
-            pack_lines.append(f"{k}: {int(v)}")
+            if k == "Aluminum ½ Pans":
+                pack_lines.append(f"Aluminum Pans: {format_pan_label(int(v), large_order_active)}")
+            else:
+                pack_lines.append(f"{k}: {int(v)}")
     y = _pdf_draw_wrapped_lines(c, pack_lines or ["None"], left, y, usable_w, bullet=True, bottom_margin=bottom)
     y -= 10
 
@@ -1264,6 +1302,8 @@ def init_state():
     st.session_state.setdefault("_reset_combo", False)
     st.session_state.setdefault("_reset_main", False)
     st.session_state.setdefault("_reset_alacarte", False)
+    st.session_state.setdefault("large_order_mode", False)
+    st.session_state.setdefault("large_order_confirm", False)
 
     if st.session_state._reset_combo:
         st.session_state.combo_tier = list(COMBO_TIERS.keys())[0]
@@ -1437,6 +1477,21 @@ with col1:
         with g1: st.toggle("Plates", key="req_plates")
         with g2: st.toggle("Utensils (Wrapped Sets)", key="req_utensils")
         with g3: st.toggle("Napkins", key="req_napkins")
+
+        st.markdown("**Special Modes**")
+        st.toggle("Large Order Mode (Miae Only)", key="large_order_mode")
+
+        if st.session_state.get("large_order_mode"):
+            st.warning(
+                "This mode is intended for Miae only for very large catering orders. "
+                "If you are not Miae, turn this off before continuing."
+            )
+            st.checkbox(
+                "I confirm that I am Miae and this order should use Large Order Mode",
+                key="large_order_confirm",
+            )
+        else:
+            st.session_state["large_order_confirm"] = False
 
     # --- 2. Build Order ---
     st.subheader("🍽️ Build Order")
