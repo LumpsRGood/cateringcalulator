@@ -565,6 +565,7 @@ def compute_order_data(lines):
                 blk["lines"] = []
                 blk["qty_total"] = blk.get("qty_total", 0) + (spec["ft_slices"] * qty)
                 blk["unit"] = "slices"
+                blk["pack_label"] = "Aluminum ½ Pans"
 
                 P("Aluminum ½ Pans", spec["half_pans_ft"] * qty)
 
@@ -710,6 +711,7 @@ def compute_order_data(lines):
                 blk["lines"] = []
                 blk["qty_total"] = blk.get("qty_total", 0) + (spec["ft_slices"] * qty)
                 blk["unit"] = "slices"
+                blk["pack_label"] = "Aluminum ½ Pans"
 
             if "eggs_oz" in spec:
                 F("Scrambled Eggs (oz)", spec["eggs_oz"] * qty)
@@ -925,11 +927,15 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         details = []
 
     elif title == "French Toast" and "qty_total" in block:
+        
         slices = int(block["qty_total"])
+        
         # 10 slices per half pan
         half_pans = math.ceil(slices / 10)
+        
         line1 = f"{title}: {slices} slices"
         details = []
+        
         block["pack_label"] = "Aluminum ½ Pans"
         block["pack_count"] = half_pans
 
