@@ -668,7 +668,7 @@ def compute_order_data(lines):
         # A LA CARTE
         # =========================================================
 
-               elif line.key.kind == "alacarte":
+        elif line.key.kind == "alacarte":
 
             spec = ALACARTE_LOOKUP[line.key.item_id]["payload"]
 
