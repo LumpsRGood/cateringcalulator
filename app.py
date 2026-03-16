@@ -910,7 +910,17 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         "Salsa",
     }
 
-    if "qty_total" in block:
+       if title == "French Toast" and "qty_total" in block:
+        slices = int(block["qty_total"])
+        half_pans = math.ceil(slices / 10)
+
+        line1 = f"{title}: {slices} slices"
+        details = []
+
+        block["pack_label"] = "Aluminum ½ Pans"
+        block["pack_count"] = half_pans
+
+    elif "qty_total" in block:
         unit = block.get("unit", "")
         if unit:
             line1 = f"{title}: {int(block['qty_total'])} {unit}"
@@ -925,19 +935,6 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
                 total_oz += float(line.replace("oz", "").strip())
         line1 = eggs_prep_line_from_oz(total_oz)
         details = []
-
-    elif title == "French Toast" and "qty_total" in block:
-        
-        slices = int(block["qty_total"])
-        
-        # 10 slices per half pan
-        half_pans = math.ceil(slices / 10)
-        
-        line1 = f"{title}: {slices} slices"
-        details = []
-        
-        block["pack_label"] = "Aluminum ½ Pans"
-        block["pack_count"] = half_pans
 
     elif title == POTATOES_NAME and raw_lines:
         total_oz = 0
