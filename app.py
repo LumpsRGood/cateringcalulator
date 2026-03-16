@@ -472,7 +472,6 @@ def compute_order_data(lines):
     def C(k,v): _add(cond,k,v)
 
     def ensure_block(key,title):
-
         if key not in prep_blocks:
             prep_blocks[key] = {
                 "title": title,
@@ -669,20 +668,19 @@ def compute_order_data(lines):
         # A LA CARTE
         # =========================================================
 
-        elif line.key.kind == "alacarte":
+               elif line.key.kind == "alacarte":
 
             spec = ALACARTE_LOOKUP[line.key.item_id]["payload"]
 
-            total_servings += spec.get("servings",0) * qty
+            total_servings += spec.get("servings", 0) * qty
 
             if "fruit_oz" in spec:
+                P("IHOP Large Plastic Base", 1 * qty)
+                S("Serving Forks", 1 * qty)
 
-                P("IHOP Large Plastic Base",1*qty)
-                S("Serving Forks",1*qty)
-
-                blk = ensure_block("fruit","Fresh Fruit")
-                blk["lines"].append(f"{spec['fruit_oz']*qty} oz")
-                blk["pack_label"]="IHOP Large Plastic Base"
+                blk = ensure_block("fruit", "Fresh Fruit")
+                blk["lines"].append(f"{spec['fruit_oz'] * qty} oz")
+                blk["pack_label"] = "IHOP Large Plastic Base"
                 blk["pack_count"] += qty
 
             if "pancakes_pcs" in spec:
@@ -693,121 +691,176 @@ def compute_order_data(lines):
                 S("Serving Tongs", 2 * qty)
 
                 blk = ensure_block("pancakes", "Buttermilk Pancakes")
+                blk["lines"] = []
                 blk["qty_total"] = blk.get("qty_total", 0) + (spec["pancakes_pcs"] * qty)
                 blk["unit"] = "pcs"
                 blk["pack_label"] = "Aluminum ½ Pans"
                 blk["pack_count"] += (2 * qty)
 
+            if "ft_slices" in spec:
+                F("French Toast (slices)", spec["ft_slices"] * qty)
+                P("Aluminum ½ Pans", 2 * qty)
+                C("Butter Packets", 10 * qty)
+                C("Syrup Packets", 10 * qty)
+                C("Powdered Sugar Cups (2 oz)", 1 * qty)
+                S("Serving Tongs", 1 * qty)
+
+                blk = ensure_block("french_toast", "French Toast")
+                blk["lines"] = []
+                blk["qty_total"] = blk.get("qty_total", 0) + (spec["ft_slices"] * qty)
+                blk["unit"] = "slices"
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += (2 * qty)
+
+            if "eggs_oz" in spec:
+                F("Scrambled Eggs (oz)", spec["eggs_oz"] * qty)
+                P("Aluminum ½ Pans", 1 * qty)
+
+                blk = ensure_block("eggs", "Scrambled Eggs")
+                blk["lines"].append(f"{spec['eggs_oz'] * qty} oz")
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += qty
+
+            if "red_pots_oz" in spec:
+                F("Red Pots (oz)", spec["red_pots_oz"] * qty)
+                P("Aluminum ½ Pans", 1 * qty)
+
+                blk = ensure_block("red_pots", POTATOES_NAME)
+                blk["lines"].append(f"{spec['red_pots_oz'] * qty} oz")
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += qty
+
+            if "bacon_pcs" in spec:
+                F("Bacon (pcs)", spec["bacon_pcs"] * qty)
+                P("IHOP Large Plastic Base", 1 * qty)
+
+                blk = ensure_block("bacon", "Bacon")
+                blk["lines"].append(f"{spec['bacon_pcs'] * qty} slices")
+                blk["pack_label"] = "IHOP Large Plastic Base"
+                blk["pack_count"] += qty
+
+            if "sausage_pcs" in spec:
+                F("Pork Sausage Links (pcs)", spec["sausage_pcs"] * qty)
+                P("IHOP Large Plastic Base", 1 * qty)
+
+                blk = ensure_block("sausage", "Pork Sausage Links")
+                blk["lines"].append(f"{spec['sausage_pcs'] * qty} links")
+                blk["pack_label"] = "IHOP Large Plastic Base"
+                blk["pack_count"] += qty
+
+            if "ham_pcs" in spec:
+                F("Sampler Ham (pcs)", spec["ham_pcs"] * qty)
+                P("IHOP Large Plastic Base", 1 * qty)
+
+                blk = ensure_block("ham", HAM_NAME)
+                blk["lines"] = []
+                blk["qty_total"] = blk.get("qty_total", 0) + (spec["ham_pcs"] * qty)
+                blk["unit"] = "pcs"
+                blk["pack_label"] = "IHOP Large Plastic Base"
+                blk["pack_count"] += qty
+
             if "fries_oz" in spec:
+                F("French Fries (oz)", spec["fries_oz"] * qty)
 
-                F("French Fries (oz)",spec["fries_oz"]*qty)
+                P("Aluminum ½ Pans", 1 * qty)
+                S("Serving Tongs", 1 * qty)
 
-                P("Aluminum ½ Pans",1*qty)
-                S("Serving Tongs",1*qty)
+                C("Ketchup Packets", 10 * qty)
 
-                C("Ketchup Packets",10*qty)
-
-                blk = ensure_block("fries","French Fries")
-                blk["lines"].append(f"{spec['fries_oz']*qty} oz")
-                blk["pack_label"]="Aluminum ½ Pans"
+                blk = ensure_block("fries", "French Fries")
+                blk["lines"].append(f"{spec['fries_oz'] * qty} oz")
+                blk["pack_label"] = "Aluminum ½ Pans"
                 blk["pack_count"] += qty
 
             if "onion_rings_rings" in spec:
+                F("Onion Rings", spec["onion_rings_rings"] * qty)
 
-                F("Onion Rings",spec["onion_rings_rings"]*qty)
+                P("Aluminum ½ Pans", 2 * qty)
+                S("Serving Tongs", 1 * qty)
 
-                P("Aluminum ½ Pans",2*qty)
-                S("Serving Tongs",1*qty)
-
-                blk = ensure_block("rings","Onion Rings")
-                blk["lines"].append(f"{spec['onion_rings_rings']*qty} rings")
-                blk["pack_label"]="Aluminum ½ Pans"
-                blk["pack_count"] += 2*qty
+                blk = ensure_block("rings", "Onion Rings")
+                blk["lines"].append(f"{spec['onion_rings_rings'] * qty} rings")
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += 2 * qty
 
             if "donut_holes_pcs" in spec:
+                F("Donut Dippers", spec["donut_holes_pcs"] * qty)
 
-                F("Donut Dippers",spec["donut_holes_pcs"]*qty)
+                P("Aluminum ½ Pans", 1 * qty)
+                P("Soup Cups (8 oz)", 4 * qty)
 
-                P("Aluminum ½ Pans",1*qty)
-                P("Soup Cups (8 oz)",4*qty)
+                S("Serving Spoons", 4 * qty)
+                S("Serving Tongs", 1 * qty)
 
-                S("Serving Spoons",4*qty)
-                S("Serving Tongs",1*qty)
-
-                blk = ensure_block("donuts","Donut Dippers")
-                blk["lines"].append(f"{spec['donut_holes_pcs']*qty} pcs")
-                blk["pack_label"]="Aluminum ½ Pans"
+                blk = ensure_block("donuts", "Donut Dippers")
+                blk["lines"].append(f"{spec['donut_holes_pcs'] * qty} pcs")
+                blk["pack_label"] = "Aluminum ½ Pans"
                 blk["pack_count"] += qty
 
-                blk = ensure_block("donut_icings","Icings")
+                blk = ensure_block("donut_icings", "Icings")
                 blk["lines"] = [
-                    f"{2*qty} Cream Cheese Icing Cups",
-                    f"{2*qty} Dulce de Leche Cups"
+                    f"{2 * qty} Cream Cheese Icing Cups",
+                    f"{2 * qty} Dulce de Leche Cups"
                 ]
-                blk["pack_label"]="Soup Cups (8 oz)"
-                blk["pack_count"] += 4*qty
+                blk["pack_label"] = "Soup Cups (8 oz)"
+                blk["pack_count"] += 4 * qty
 
             if "burritos_pcs" in spec:
+                F("Breakfast Burritos", spec["burritos_pcs"] * qty)
 
-                F("Breakfast Burritos",spec["burritos_pcs"]*qty)
+                P("Aluminum ½ Pans", 2 * qty)
+                P("Soup Cups (8 oz)", 2 * qty)
 
-                P("Aluminum ½ Pans",2*qty)
-                P("Soup Cups (8 oz)",2*qty)
+                S("Serving Spoons", 2 * qty)
 
-                S("Serving Spoons",2*qty)
+                blk = ensure_block("burritos", "Classic Breakfast Burritos")
+                blk["lines"].append(f"{spec['burritos_pcs'] * qty} pcs")
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += 2 * qty
 
-                blk = ensure_block("burritos","Classic Breakfast Burritos")
-                blk["lines"].append(f"{spec['burritos_pcs']*qty} pcs")
-                blk["pack_label"]="Aluminum ½ Pans"
-                blk["pack_count"] += 2*qty
-
-                # salsa cups
-                blk = ensure_block("burrito_salsa","Salsa")
-                blk["lines"].append(f"{16*qty} oz")
-                blk["pack_label"]="Soup Cups (8 oz)"
-                blk["pack_count"] += 2*qty
+                blk = ensure_block("burrito_salsa", "Salsa")
+                blk["lines"].append(f"{16 * qty} oz")
+                blk["pack_label"] = "Soup Cups (8 oz)"
+                blk["pack_count"] += 2 * qty
 
             if "salad_10" in spec:
+                P("IHOP Large Plastic Base", 1 * qty)
+                P("Soup Cups (8 oz)", 1 * qty)
 
-                P("IHOP Large Plastic Base",1*qty)
-                P("Soup Cups (8 oz)",1*qty)
+                S("Serving Spoons", 1 * qty)
+                S("Serving Tongs", 1 * qty)
 
-                S("Serving Spoons",1*qty)
-                S("Serving Tongs",1*qty)
-
-                blk = ensure_block("salad","Salad")
+                blk = ensure_block("salad", "Salad")
                 blk["lines"] = [
-                    f"{5*qty} portions Lettuce Blend",
-                    f"{5*qty} oz Cheese",
-                    f"{5*qty} oz Tomatoes",
-                    f"{8*qty} Red Onion Rings (quartered)"
+                    f"{5 * qty} portions Lettuce Blend",
+                    f"{5 * qty} oz Cheese",
+                    f"{5 * qty} oz Tomatoes",
+                    f"{8 * qty} Red Onion Rings (quartered)"
                 ]
-                blk["pack_label"]="IHOP Large Plastic Base"
+                blk["pack_label"] = "IHOP Large Plastic Base"
                 blk["pack_count"] += qty
 
-                blk = ensure_block("salad_dressing","Dressing")
-                blk["lines"] = [f"{8*qty} oz"]
-                blk["pack_label"]="Soup Cups (8 oz)"
+                blk = ensure_block("salad_dressing", "Dressing")
+                blk["lines"] = [f"{8 * qty} oz"]
+                blk["pack_label"] = "Soup Cups (8 oz)"
                 blk["pack_count"] += qty
 
             if "strawberry_topping_oz" in spec:
+                P("IHOP Large Plastic Base", 1 * qty)
+                S("Serving Forks", 1 * qty)
 
-                P("IHOP Large Plastic Base",1*qty)
-                S("Serving Forks",1*qty)
-
-                blk = ensure_block("strawberry","Strawberry Topping")
-                blk["lines"].append(f"{spec['strawberry_topping_oz']*qty} oz")
-                blk["pack_label"]="IHOP Large Plastic Base"
+                blk = ensure_block("strawberry", "Strawberry Topping")
+                blk["lines"].append(f"{spec['strawberry_topping_oz'] * qty} oz")
+                blk["pack_label"] = "IHOP Large Plastic Base"
                 blk["pack_count"] += qty
 
             if "blueberry_topping_oz" in spec:
+                P("IHOP Large Plastic Base", 1 * qty)
+                S("Serving Forks", 1 * qty)
 
-                P("IHOP Large Plastic Base",1*qty)
-                S("Serving Forks",1*qty)
-
-                blk = ensure_block("blueberry","Blueberry Topping")
-                blk["lines"].append(f"{spec['blueberry_topping_oz']*qty} oz")
-                blk["pack_label"]="IHOP Large Plastic Base"
+                blk = ensure_block("blueberry", "Blueberry Topping")
+                blk["lines"].append(f"{spec['blueberry_topping_oz'] * qty} oz")
+                blk["pack_label"] = "IHOP Large Plastic Base"
                 blk["pack_count"] += qty
 
     return total_servings, food, packaging, guestware, service, cond, prep_blocks
