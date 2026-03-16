@@ -513,7 +513,7 @@ def compute_order_data(lines):
             F(f"{POTATOES_NAME} (oz)", spec["red_pots_oz"] * qty)
             P("Aluminum ½ Pans", spec["half_pans_red_pots"] * qty)
 
-            blk = ensure_block("redpots",POTATOES_NAME)
+            blk = ensure_block("red_pots",POTATOES_NAME)
             blk["lines"].append(f'{spec["red_pots_oz"]*qty} oz')
             blk["pack_label"] = "Aluminum ½ Pans"
             blk["pack_count"] += spec["half_pans_red_pots"] * qty
@@ -561,13 +561,16 @@ def compute_order_data(lines):
 
                 F("French Toast (slices)", spec["ft_slices"] * qty)
 
-                blk = ensure_block("ft","French Toast")
-                blk["lines"].append(f'{spec["ft_slices"]*qty} slices')
+                blk = ensure_block("french_toast", "French Toast")
+                blk["lines"] = []
+                blk["qty_total"] = blk.get("qty_total", 0) + (spec["ft_slices"] * qty)
+                blk["unit"] = "slices"
+                blk["pack_label"] = "Aluminum ½ Pans"
+                blk["pack_count"] += spec["half_pans_ft"] * qty
 
                 P("Aluminum ½ Pans", spec["half_pans_ft"] * qty)
 
                 C("Powdered Sugar Cups (2 oz)", spec["powdered_sugar_cups_2oz"] * qty)
-
             C("Butter Packets", spec["butter_packets"] * qty)
             C("Syrup Packets", spec["syrup_packets"] * qty)
             C("Ketchup Packets", spec["ketchup_packets"] * qty)
