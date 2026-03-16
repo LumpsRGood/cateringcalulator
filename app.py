@@ -910,7 +910,7 @@ def format_prep_block(block: Dict) -> Tuple[str, List[str], str]:
         "Salsa",
     }
 
-       if title == "French Toast" and "qty_total" in block:
+    if title == "French Toast" and "qty_total" in block:
         slices = int(block["qty_total"])
         half_pans = math.ceil(slices / 10)
 
